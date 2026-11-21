@@ -1,0 +1,22 @@
+{
+    "name": "Horizonte.Editor",
+    "rootNamespace": "Horizonte.EditorTools",
+    "references": [
+        "Horizonte.Simulation",
+        "Horizonte.Presentation",
+        "Unity.InputSystem",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

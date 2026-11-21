@@ -1,0 +1,29 @@
+# Unity
+/Library/
+/Temp/
+/Obj/
+/Logs/
+/UserSettings/
+/MemoryCaptures/
+/Builds/
+*.csproj
+*.sln
+*.slnx
+*.pidb
+*.user
+*.unityproj
+.vs/
+.idea/
+
+# Blender backups (the .blend sources can live in /Blender, the game uses the exported FBX)
+*.blend1
+*.blend2
+
+# Never commit Apple credentials
+*.p8
+*.p12
+*.mobileprovision
+
+# fastlane output
+/entrega/
+/fastlane/report.xml
