@@ -67,6 +67,7 @@ namespace Horizonte.Tests
             for (int x = 4; x < 12; x++) city.Place(Id("casa_basica"), x, 11);
             city.Place(Id("tienda_abarrotes"), 4, 9);
             city.Place(Id("granja_agricola"), 6, 6);
+            city.FinishConstruction();
             Assert.IsTrue(city.Working(city.Index(4, 11)));
             Days(city, 120);
             Assert.Greater(city.Population, 10);
@@ -92,6 +93,7 @@ namespace Horizonte.Tests
             city.Place(Id("casa_basica"), 50, 11);
             Assert.IsFalse(city.Powered[city.Index(50, 11)]);
             for (int x = 12; x < 50; x += 9) city.Place(Id("subestacion"), x, 11);
+            city.FinishConstruction();
             Assert.IsTrue(city.Powered[city.Index(50, 11)]);
         }
 
@@ -103,7 +105,23 @@ namespace Horizonte.Tests
             city.Place(Id("casa_basica"), 4, 11);
             Assert.IsFalse(city.Covered(city.Index(4, 11), Service.Health));
             city.Place(Id("consultorio"), 6, 8);
+            city.FinishConstruction();
             Assert.IsTrue(city.Covered(city.Index(4, 11), Service.Health));
+        }
+
+        [Test]
+        public void BuildingsWorkOnlyOnceFinished()
+        {
+            var city = Flat();
+            city.Place(Id("central_termoelectrica"), 0, 11);
+            city.Place(Id("tienda_abarrotes"), 4, 11);
+            int shop = city.Index(4, 11);
+            Assert.Greater(city.Construction[shop], 0);
+            Assert.IsFalse(city.Working(shop));
+            Days(city, Catalog.BuildDays(Catalog.Get("central_termoelectrica")));
+            Assert.AreEqual(0, city.Construction[shop]);
+            Assert.IsTrue(city.Working(shop));
+            Assert.AreEqual(6, city.Jobs);
         }
 
         [Test]

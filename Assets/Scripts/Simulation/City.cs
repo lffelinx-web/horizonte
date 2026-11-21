@@ -25,6 +25,8 @@ namespace Horizonte.Simulation
         public readonly int[] Anchor;
         /// <summary>Direction the building faces: 0 south, 1 west, 2 north, 3 east. Read at the anchor.</summary>
         public readonly byte[] Rotation;
+        /// <summary>Days left until a building is finished, read at its anchor; it does not work meanwhile.</summary>
+        public readonly byte[] Construction;
         /// <summary>Residents living in a home, read at its anchor.</summary>
         public readonly int[] Occupants;
         public readonly bool[] Powered;
@@ -87,6 +89,7 @@ namespace Horizonte.Simulation
             Anchor = new int[n];
             Rotation = new byte[n];
             Occupants = new int[n];
+            Construction = new byte[n];
             Powered = new bool[n];
             RoadConnected = new bool[n];
             Served = new bool[n];
@@ -185,6 +188,7 @@ namespace Horizonte.Simulation
                 MarkChanged(i);
             }
             Rotation[anchor] = FacingRoad(x, y, def.Width, def.Height);
+            Construction[anchor] = (byte)Catalog.BuildDays(def);
             if (def.IsRoad) RefreshRoadNeighbours(x, y);
             UpdateNetworks();
             UpdateStats();
@@ -234,6 +238,7 @@ namespace Horizonte.Simulation
                 Anchor[j] = -1;
                 Rotation[j] = 0;
                 Occupants[j] = 0;
+                Construction[j] = 0;
                 Powered[j] = false;
                 Served[j] = false;
                 MarkChanged(j);
@@ -301,7 +306,7 @@ namespace Horizonte.Simulation
         {
             var def = DefAt(anchor);
             if (def == null || def.IsRoad) return false;
-            return Served[anchor] && (def.Kind == Kind.Power || Powered[anchor]);
+            return Served[anchor] && Construction[anchor] == 0 && (def.Kind == Kind.Power || Powered[anchor]);
         }
 
         // ---------------------------------------------------------------- networks
@@ -380,7 +385,7 @@ namespace Horizonte.Simulation
             var nodes = new List<int>();
             for (int i = 0; i < n; i++)
             {
-                if (Anchor[i] != i || !Served[i]) continue;
+                if (Anchor[i] != i || !Served[i] || Construction[i] > 0) continue;
                 if (DefAt(i).PowerReach > 0) nodes.Add(i);
             }
             // Generators are live; substations join when the grid reaches them.
@@ -419,7 +424,7 @@ namespace Horizonte.Simulation
             int demand = 0;
             for (int i = 0; i < n; i++)
             {
-                if (Anchor[i] != i || !Served[i]) continue;
+                if (Anchor[i] != i || !Served[i] || Construction[i] > 0) continue;
                 var def = DefAt(i);
                 if (def.PowerReach > 0 || def.PowerUse <= 0) continue;
                 demand += def.PowerUse;
@@ -539,6 +544,7 @@ namespace Horizonte.Simulation
             UpdateStats();
             UpdateDemand();
             MoveResidents();
+            AdvanceConstruction();
             UpdateNetworks();
             UpdateStats();
             Day++;
@@ -650,6 +656,29 @@ namespace Horizonte.Simulation
                     Occupants[i] = Math.Max(0, now - Math.Max(1, cap / 25));
                 }
             }
+        }
+
+        void AdvanceConstruction()
+        {
+            for (int i = 0; i < Construction.Length; i++)
+            {
+                if (Construction[i] == 0) continue;
+                Construction[i]--;
+                if (Construction[i] == 0) MarkChanged(i);
+            }
+        }
+
+        /// <summary>Completes every building at once (showcases and tests).</summary>
+        public void FinishConstruction()
+        {
+            for (int i = 0; i < Construction.Length; i++)
+            {
+                if (Construction[i] == 0) continue;
+                Construction[i] = 0;
+                MarkChanged(i);
+            }
+            UpdateNetworks();
+            UpdateStats();
         }
 
         void RunBudget()

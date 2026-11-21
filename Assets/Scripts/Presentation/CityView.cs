@@ -26,6 +26,7 @@ namespace Horizonte.Presentation
         readonly HashSet<int> dirtyChunks = new HashSet<int>();
         readonly List<int> changes = new List<int>();
         readonly Dictionary<int, GameObject> buildings = new Dictionary<int, GameObject>();
+        readonly Dictionary<int, ConstructionSite> sites = new Dictionary<int, ConstructionSite>();
         Transform buildingRoot;
         BuildingFactory factory;
 
@@ -71,6 +72,7 @@ namespace Horizonte.Presentation
             foreach (Transform child in transform) Destroy(child.gameObject);
             selectionFilter = null;
             buildings.Clear();
+            sites.Clear();
             buildingRoot = new GameObject("Edificios").transform;
             buildingRoot.SetParent(transform, false);
 
@@ -116,9 +118,16 @@ namespace Horizonte.Presentation
             go.GetComponent<MeshRenderer>().sharedMaterial = m;
         }
 
-        /// <summary>Applies the simulation's changes. Call once per frame.</summary>
-        public void Sync()
+        /// <summary>Applies the simulation's changes. Call once per frame; dayFraction is how far the current day has gone (0 to 1).</summary>
+        public void Sync(float dayFraction = 0)
         {
+            foreach (var kv in sites)
+            {
+                var def = city.DefAt(kv.Key);
+                int total = def == null ? 1 : Mathf.Max(1, Catalog.BuildDays(def));
+                float left = Mathf.Max(0, city.Construction[kv.Key] - dayFraction);
+                kv.Value.SetProgress(1 - left / total);
+            }
             changes.Clear();
             city.DrainChanges(changes);
             foreach (int i in changes)
@@ -309,6 +318,11 @@ namespace Horizonte.Presentation
                 Destroy(old);
                 buildings.Remove(i);
             }
+            if (sites.TryGetValue(i, out var site))
+            {
+                Destroy(site.gameObject);
+                sites.Remove(i);
+            }
             var def = city.DefAt(i);
             if (def == null || def.IsRoad || city.Anchor[i] != i) return;
             int w = def.Width, h = def.Height;
@@ -319,6 +333,7 @@ namespace Horizonte.Presentation
             // A few centimetres up so the lot drawn in the model covers the ground underneath.
             go.transform.localPosition = new Vector3((x + w * .5f) * TileSize, .05f, (y + h * .5f) * TileSize);
             buildings[i] = go;
+            if (city.Construction[i] > 0) sites[i] = ConstructionSite.Create(buildingRoot, go, Hash(x, y));
         }
     }
 }

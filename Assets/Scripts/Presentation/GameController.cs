@@ -68,7 +68,7 @@ namespace Horizonte.Presentation
                 clock -= 1;
                 City.Step();
             }
-            View.Sync();
+            View.Sync(clock);
         }
 
         public void SelectTool(Tool t)
@@ -224,6 +224,28 @@ namespace Horizonte.Presentation
                 ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_interfaz.png"));
                 yield return null;
                 yield return null;
+
+                // A building going up, a third of the way through its works.
+                City.IgnoreRequirements = true;
+                var tower = Catalog.Get("torre_corporativa");
+                int site = -1;
+                for (int y = City.Height / 2 - 14; y < City.Height / 2 + 14 && site < 0; y++)
+                for (int x = City.Width / 2 - 22; x < City.Width / 2 + 6 && site < 0; x++)
+                    if (City.CanPlace(tower.Id, x, y) == PlaceResult.Ok) site = City.Index(x, y);
+                if (site >= 0)
+                {
+                    City.Place(tower.Id, site % City.Width, site / City.Width);
+                    for (int d = 0; d < Catalog.BuildDays(tower) / 2; d++) City.Step();
+                    Hud.HideInfo();
+                    Rig.Focus = new Vector3((site % City.Width + tower.Width * .5f) * CityView.TileSize, 0, (site / City.Width + tower.Height * .5f) * CityView.TileSize);
+                    Rig.Yaw = 40;
+                    Rig.Distance = 230;
+                    yield return new WaitForSecondsRealtime(4);
+                    ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_obra.png"));
+                    yield return null;
+                    yield return null;
+                }
+                City.IgnoreRequirements = false;
 
                 // Close-ups to check that models face the street (rotation 0 faces south, toward a camera at yaw 0).
                 Hud.HideInfo();

@@ -17,6 +17,8 @@ namespace Horizonte.Simulation
         public string name;
         /// <summary>Terrain and rotation are one byte per tile; buildings are catalog models by name; occupants four bytes.</summary>
         public string terrain, building, rotation, occupants;
+        /// <summary>Days left on buildings under construction (one byte per tile); missing in older saves.</summary>
+        public string construction;
         public string[] models;
 
         public static CitySave From(City city)
@@ -55,6 +57,7 @@ namespace Horizonte.Simulation
                 building = Convert.ToBase64String(building),
                 rotation = Convert.ToBase64String(city.Rotation),
                 occupants = Convert.ToBase64String(occupants),
+                construction = Convert.ToBase64String(city.Construction),
                 models = table.ToArray(),
             };
         }
@@ -69,6 +72,7 @@ namespace Horizonte.Simulation
             var b = Convert.FromBase64String(building);
             var r = Convert.FromBase64String(rotation);
             var o = Convert.FromBase64String(occupants);
+            var k2 = string.IsNullOrEmpty(construction) ? new byte[n] : Convert.FromBase64String(construction);
             if (t.Length != n || b.Length != n * 2 || r.Length != n || o.Length != n * 4) throw new InvalidOperationException("Corrupt save.");
             var ids = new ushort[models.Length];
             for (int k = 1; k < models.Length; k++) ids[k] = Catalog.Get(models[k])?.Id ?? Catalog.None;
@@ -79,6 +83,7 @@ namespace Horizonte.Simulation
                 city.Building[i] = code < ids.Length ? ids[code] : Catalog.None;
                 city.Rotation[i] = r[i];
                 city.Occupants[i] = BitConverter.ToInt32(o, i * 4);
+                city.Construction[i] = i < k2.Length ? k2[i] : (byte)0;
             }
             RebuildAnchors(city);
             city.Refresh();

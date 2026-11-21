@@ -902,7 +902,12 @@ namespace Horizonte.Presentation
                         if (def.Desirability != 0) AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), def.Desirability > 0 ? UiKit.Good : UiKit.Bad);
                         break;
                 }
-                if (!def.IsRoad && !working) AddRow("warning", UiKit.Bad, "No funciona", !c.Served[a] ? "sin calle conectada" : "sin electricidad", UiKit.Bad);
+                if (c.Construction[a] > 0)
+                {
+                    int total = Mathf.Max(1, Catalog.BuildDays(def)), left = c.Construction[a];
+                    AddRow("level", UiKit.Warn, "En construcción", $"{(total - left) * 100 / total} %  ·  faltan {left} {(left == 1 ? "día" : "días")}", UiKit.Warn);
+                }
+                else if (!def.IsRoad && !working) AddRow("warning", UiKit.Bad, "No funciona", !c.Served[a] ? "sin calle conectada" : "sin electricidad", UiKit.Bad);
                 game.View.SetSelection(a % c.Width, a / c.Width, def.Width, def.Height);
             }
 

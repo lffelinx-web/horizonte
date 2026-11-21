@@ -73,6 +73,7 @@ namespace Horizonte.Presentation
                 city.Place(def.Id, x, street + 1);
                 x += def.Width + 1;
             }
+            city.FinishConstruction();
             city.Refresh();
             return city;
         }

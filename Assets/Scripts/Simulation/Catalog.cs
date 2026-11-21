@@ -259,6 +259,10 @@ namespace Horizonte.Simulation
             smart.Summary = "Satisfacción +6 en toda la ciudad";
         }
 
+        /// <summary>Days a building takes to go up: a few for a house, weeks for big projects. Streets are instant.</summary>
+        public static int BuildDays(BuildingDef def) =>
+            def.IsRoad ? 0 : System.Math.Max(3, System.Math.Min(60, (int)System.Math.Round(System.Math.Sqrt(def.Cost) / 6)));
+
         // ---------------------------------------------------------------- services
 
         /// <summary>Spanish name of a service, for the interface.</summary>
