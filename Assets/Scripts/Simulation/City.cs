@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Horizonte.Simulation
 {
-    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney }
+    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked }
 
     /// <summary>
     /// The whole city: a grid of tiles plus money, time and statistics. One call to <see cref="Step"/> is one day.
@@ -23,6 +23,10 @@ namespace Horizonte.Simulation
         public readonly byte[] Rotation;
         /// <summary>Index of the tile that owns a multi-tile building (its south-west corner), or -1.</summary>
         public readonly int[] Anchor;
+        /// <summary>Side, in lots, of the square building a zone grew into; read at its anchor.</summary>
+        public readonly byte[] Size;
+        /// <summary>Within reach of a working health building.</summary>
+        public readonly bool[] HealthCover;
         public readonly bool[] Powered;
         /// <summary>A road connected to the map edge is within reach.</summary>
         public readonly bool[] RoadAccess;
@@ -36,6 +40,8 @@ namespace Horizonte.Simulation
         public string Name = "Horizonte";
         public int TaxRate = 9;
         public uint RngState;
+        /// <summary>Lets every building be placed whatever the population (for showcases and tests).</summary>
+        public bool IgnoreRequirements;
 
         public int Population { get; private set; }
         public int CommercialJobs { get; private set; }
@@ -50,6 +56,8 @@ namespace Horizonte.Simulation
         public int LastExpenses { get; private set; }
         /// <summary>How happy residents are, 0 to 100 (0 while nobody lives in the city).</summary>
         public int Satisfaction { get; private set; }
+        /// <summary>Share of residents with a health building nearby, 0 to 100.</summary>
+        public int HealthCoverage { get; private set; }
 
         public int Month => Day / DaysPerMonth % MonthsPerYear;
         public int Year => Day / (DaysPerMonth * MonthsPerYear) + 1;
@@ -73,12 +81,18 @@ namespace Horizonte.Simulation
             Level = new byte[n];
             Rotation = new byte[n];
             Anchor = new int[n];
+            Size = new byte[n];
+            HealthCover = new bool[n];
             Powered = new bool[n];
             RoadAccess = new bool[n];
             RoadConnected = new bool[n];
             Desirability = new int[n];
             reach = new int[n];
-            for (int i = 0; i < n; i++) Anchor[i] = -1;
+            for (int i = 0; i < n; i++)
+            {
+                Anchor[i] = -1;
+                Size[i] = 1;
+            }
             RngState = seed == 0 ? 1u : seed;
             Money = StartMoney;
         }
@@ -107,6 +121,7 @@ namespace Horizonte.Simulation
         {
             var def = Catalog.Get(type);
             if (def == null) return PlaceResult.Occupied;
+            if (!IgnoreRequirements && Population < def.MinPopulation) return PlaceResult.Locked;
             for (int dy = 0; dy < def.Height; dy++)
             for (int dx = 0; dx < def.Width; dx++)
             {
@@ -144,6 +159,7 @@ namespace Horizonte.Simulation
                 Structure[i] = type;
                 Level[i] = 0;
                 Anchor[i] = anchor;
+                Size[i] = 1;
                 MarkChanged(i);
             }
             Rotation[anchor] = FacingRoad(x, y, def.Width, def.Height);
@@ -186,16 +202,17 @@ namespace Horizonte.Simulation
             if (Money < Catalog.BulldozeCost) return false;
             Money -= Catalog.BulldozeCost;
             var type = Structure[i];
-            var def = Catalog.Get(type);
             int anchor = Anchor[i];
             int ax = anchor % Width, ay = anchor / Width;
-            for (int dy = 0; dy < def.Height; dy++)
-            for (int dx = 0; dx < def.Width; dx++)
+            int w = FootprintWidth(anchor), h = FootprintHeight(anchor);
+            for (int dy = 0; dy < h; dy++)
+            for (int dx = 0; dx < w; dx++)
             {
                 int j = Index(ax + dx, ay + dy);
                 Structure[j] = Simulation.Structure.None;
                 Level[j] = 0;
                 Anchor[j] = -1;
+                Size[j] = 1;
                 Rotation[j] = 0;
                 Powered[j] = false;
                 MarkChanged(j);
@@ -216,12 +233,37 @@ namespace Horizonte.Simulation
                 if (Structure[j] == Simulation.Structure.None) continue;
                 MarkChanged(j);
                 int anchor = Anchor[j];
-                if (anchor == j && Structure[j] != Simulation.Structure.Road)
+                if (anchor >= 0 && Structure[j] != Simulation.Structure.Road)
                 {
-                    var def = Catalog.Get(Structure[j]);
-                    Rotation[j] = FacingRoad(nx, ny, def.Width, def.Height);
+                    byte facing = FacingRoad(anchor % Width, anchor / Width, FootprintWidth(anchor), FootprintHeight(anchor));
+                    if (facing != Rotation[anchor])
+                    {
+                        Rotation[anchor] = facing;
+                        MarkChanged(anchor);
+                    }
                 }
             }
+        }
+
+        /// <summary>Width in tiles of the building anchored at a tile (zones that grew together are square).</summary>
+        public int FootprintWidth(int anchor)
+        {
+            var def = Catalog.Get(Structure[anchor]);
+            return def == null ? 1 : def.IsZone ? Size[anchor] : def.Width;
+        }
+
+        public int FootprintHeight(int anchor)
+        {
+            var def = Catalog.Get(Structure[anchor]);
+            return def == null ? 1 : def.IsZone ? Size[anchor] : def.Height;
+        }
+
+        /// <summary>Power the whole building anchored at a tile draws.</summary>
+        int BuildingPower(int anchor)
+        {
+            var type = Structure[anchor];
+            int use = Catalog.PowerUse(type, Level[anchor]);
+            return Catalog.Get(type).IsZone ? use * Size[anchor] * Size[anchor] : use;
         }
 
         // South, west, north, east: matches Rotation.
@@ -248,6 +290,7 @@ namespace Horizonte.Simulation
             UpdateRoads();
             UpdatePower();
             UpdateDesirability();
+            UpdateHealth();
         }
 
         void UpdateRoads()
@@ -324,7 +367,7 @@ namespace Horizonte.Simulation
                     Powered[i] = true;
                     queue.Enqueue(i);
                 }
-                else if (Anchor[i] == i) demand += Catalog.PowerUse(Structure[i], Level[i]);
+                else if (Anchor[i] == i) demand += BuildingPower(i);
             }
             int remaining = supply;
             while (queue.Count > 0)
@@ -338,14 +381,14 @@ namespace Horizonte.Simulation
                     int j = Index(nx, ny);
                     if (Powered[j] || Structure[j] == Simulation.Structure.None) continue;
                     int anchor = Anchor[j];
-                    int use = anchor == j || !Powered[anchor] ? Catalog.PowerUse(Structure[j], Level[anchor]) : 0;
+                    int use = BuildingPower(anchor);
                     if (use > remaining) continue;
                     remaining -= use;
                     // A multi-tile building is powered as a whole.
-                    var def = Catalog.Get(Structure[j]);
                     int ax = anchor % Width, ay = anchor / Width;
-                    for (int dy = 0; dy < def.Height; dy++)
-                    for (int dx = 0; dx < def.Width; dx++)
+                    int fw = FootprintWidth(anchor), fh = FootprintHeight(anchor);
+                    for (int dy = 0; dy < fh; dy++)
+                    for (int dx = 0; dx < fw; dx++)
                     {
                         int k = Index(ax + dx, ay + dy);
                         if (Powered[k]) continue;
@@ -374,9 +417,31 @@ namespace Horizonte.Simulation
                 if (def == null || def.Radius == 0) continue;
                 // Industry only pollutes once something is built on the lot.
                 if (def.IsZone && Level[i] == 0) continue;
-                Stamp(i % Width, i / Width, def.Width, def.Height, def.Radius, def.Desirability);
+                Stamp(i % Width, i / Width, FootprintWidth(i), FootprintHeight(i), def.Radius, def.Desirability);
             }
             for (int i = 0; i < n; i++) Desirability[i] = Math.Max(-100, Math.Min(100, Desirability[i]));
+        }
+
+        /// <summary>Homes within the radius of a powered health building get medical care.</summary>
+        void UpdateHealth()
+        {
+            Array.Clear(HealthCover, 0, HealthCover.Length);
+            for (int i = 0; i < Structure.Length; i++)
+            {
+                if (Anchor[i] != i || !Powered[i]) continue;
+                var def = Catalog.Get(Structure[i]);
+                if (def == null || !def.IsHealth) continue;
+                float cx = i % Width + (def.Width - 1) * .5f, cy = i / Width + (def.Height - 1) * .5f;
+                float reachDistance = def.Radius + Math.Max(def.Width, def.Height) * .5f;
+                int x0 = Math.Max(0, (int)(cx - reachDistance)), x1 = Math.Min(Width - 1, (int)(cx + reachDistance) + 1);
+                int y0 = Math.Max(0, (int)(cy - reachDistance)), y1 = Math.Min(Height - 1, (int)(cy + reachDistance) + 1);
+                for (int y = y0; y <= y1; y++)
+                for (int x = x0; x <= x1; x++)
+                {
+                    float dx = x - cx, dy = y - cy;
+                    if (dx * dx + dy * dy <= reachDistance * reachDistance) HealthCover[Index(x, y)] = true;
+                }
+            }
         }
 
         void Stamp(int x, int y, int w, int h, int radius, int strength)
@@ -415,13 +480,13 @@ namespace Horizonte.Simulation
 
         void UpdateStats()
         {
-            int pop = 0, com = 0, ind = 0;
+            int pop = 0, com = 0, ind = 0, covered = 0;
             for (int i = 0; i < Structure.Length; i++)
             {
                 int cap = Catalog.Capacity(Structure[i], Level[i]);
                 switch (Structure[i])
                 {
-                    case Simulation.Structure.Residential: pop += cap; break;
+                    case Simulation.Structure.Residential: pop += cap; if (HealthCover[i]) covered += cap; break;
                     case Simulation.Structure.Commercial: com += cap; break;
                     case Simulation.Structure.Industrial: ind += cap; break;
                 }
@@ -429,6 +494,7 @@ namespace Horizonte.Simulation
             Population = pop;
             CommercialJobs = com;
             IndustrialJobs = ind;
+            HealthCoverage = pop == 0 ? 0 : covered * 100 / pop;
             Satisfaction = ComputeSatisfaction();
         }
 
@@ -443,6 +509,9 @@ namespace Horizonte.Simulation
                 double s = 62 + Desirability[i] * .4;
                 if (!Powered[i]) s -= 30;
                 if (!RoadAccess[i]) s -= 20;
+                // Medical care matters once the town is more than a village.
+                if (HealthCover[i]) s += 6;
+                else if (Population >= 300) s -= 10;
                 score += s * cap;
                 weight += cap;
             }
@@ -493,6 +562,7 @@ namespace Horizonte.Simulation
         {
             for (int i = 0; i < Structure.Length; i++)
             {
+                if (Anchor[i] != i) continue;
                 var type = Structure[i];
                 var zoneDef = Catalog.Get(type);
                 if (zoneDef == null || !zoneDef.IsZone) continue;
@@ -502,7 +572,7 @@ namespace Horizonte.Simulation
                 if (!served)
                 {
                     // Without road or power, buildings slowly empty out.
-                    if (level > 0 && Chance(.02f)) SetLevel(i, level - 1);
+                    if (level > 0 && Chance(.02f)) Decline(i);
                     continue;
                 }
                 float desire = Desirability[i] / 100f;
@@ -512,24 +582,108 @@ namespace Horizonte.Simulation
                     float chance = .06f * demand * (1 + desire) / (1 + level);
                     if (level >= 1 && desire < -.15f) chance = 0;
                     if (level >= 2 && (desire < .1f || Population < 400)) chance = 0;
-                    if (Chance(chance)) SetLevel(i, level + 1);
+                    if (Chance(chance)) TryGrow(i, level + 1);
                 }
                 else if (level > 0 && demand < -.35f && Chance(.015f * -demand))
                 {
-                    SetLevel(i, level - 1);
+                    Decline(i);
                 }
             }
         }
 
-        void SetLevel(int i, int level)
+        /// <summary>
+        /// Grows the building at an anchor to the next level. Bigger buildings take over neighbouring lots of the same
+        /// zone, as long as every building there fits inside the new one and is not taller.
+        /// </summary>
+        /// <summary>Grows the building on a tile one level right away, if it has room. Used by tests and tools.</summary>
+        public bool Upgrade(int x, int y, int onlySize = 0)
         {
-            if (Level[i] == 0 && level > 0)
+            if (!InBounds(x, y)) return false;
+            int a = Anchor[Index(x, y)];
+            if (a < 0 || !Catalog.Get(Structure[a]).IsZone || Level[a] >= Catalog.MaxLevel) return false;
+            bool grown = TryGrow(a, Level[a] + 1, onlySize);
+            if (grown) UpdateNetworks();
+            UpdateStats();
+            return grown;
+        }
+
+        bool TryGrow(int anchor, int level, int onlySize = 0)
+        {
+            var type = Structure[anchor];
+            int ax = anchor % Width, ay = anchor / Width, size = Size[anchor];
+            var sizes = Catalog.Footprints(type, level);
+            int start = sizes.Length > 1 ? (int)(NextRandom() * sizes.Length) : 0;
+            for (int k = 0; k < sizes.Length; k++)
             {
-                var def = Catalog.Get(Structure[i]);
-                Rotation[i] = FacingRoad(i % Width, i / Width, def.Width, def.Height);
+                int f = sizes[(start + k) % sizes.Length];
+                if (f < size || (onlySize > 0 && f != onlySize)) continue;
+                // Try every square of side f that contains the current building, starting at a random corner.
+                int span = f - size + 1, offset = (int)(NextRandom() * span * span);
+                for (int c = 0; c < span * span; c++)
+                {
+                    int o = (offset + c) % (span * span);
+                    int x0 = ax - o % span, y0 = ay - o / span;
+                    if (!CanMerge(type, x0, y0, f, level - 1)) continue;
+                    Merge(x0, y0, f, level);
+                    return true;
+                }
             }
-            Level[i] = (byte)level;
-            MarkChanged(i);
+            return false;
+        }
+
+        bool CanMerge(Structure type, int x0, int y0, int f, int maxLevel)
+        {
+            bool access = false;
+            for (int y = y0; y < y0 + f; y++)
+            for (int x = x0; x < x0 + f; x++)
+            {
+                if (!InBounds(x, y)) return false;
+                int j = Index(x, y);
+                if (Structure[j] != type || Level[j] > maxLevel || !Powered[j]) return false;
+                int b = Anchor[j], bx = b % Width, by = b / Width, bs = Size[b];
+                if (bx < x0 || by < y0 || bx + bs > x0 + f || by + bs > y0 + f) return false;
+                access |= RoadAccess[j];
+            }
+            return access;
+        }
+
+        void Merge(int x0, int y0, int f, int level)
+        {
+            int anchor = Index(x0, y0);
+            for (int y = y0; y < y0 + f; y++)
+            for (int x = x0; x < x0 + f; x++)
+            {
+                int j = Index(x, y);
+                Anchor[j] = anchor;
+                Level[j] = (byte)level;
+                Size[j] = 1;
+                MarkChanged(j);
+            }
+            Size[anchor] = (byte)f;
+            Rotation[anchor] = FacingRoad(x0, y0, f, f);
+        }
+
+        /// <summary>Drops a building one level; a building on several lots breaks up into houses.</summary>
+        void Decline(int anchor)
+        {
+            int size = Size[anchor], level = Level[anchor] - 1;
+            if (size == 1)
+            {
+                Level[anchor] = (byte)level;
+                MarkChanged(anchor);
+                return;
+            }
+            int ax = anchor % Width, ay = anchor / Width;
+            for (int y = ay; y < ay + size; y++)
+            for (int x = ax; x < ax + size; x++)
+            {
+                int j = Index(x, y);
+                Anchor[j] = j;
+                Size[j] = 1;
+                Level[j] = 1;
+                Rotation[j] = FacingRoad(x, y, 1, 1);
+                MarkChanged(j);
+            }
         }
 
         void RunBudget()

@@ -5,7 +5,7 @@ namespace Horizonte.Presentation
     /// <summary>Orbit camera over the map: a focus point on the ground, a heading, and a zoom distance.</summary>
     public sealed class CameraRig : MonoBehaviour
     {
-        public const float MinDistance = 35, MaxDistance = 520;
+        public const float MinDistance = 40, MaxDistance = 650;
 
         public Camera Cam { get; private set; }
         public Vector3 Focus;

@@ -15,11 +15,6 @@ namespace Horizonte.Presentation
     {
         const int Wall = 0, Roof = 1, Glass = 2, Accent = 3;
         const float T = CityView.TileSize;
-        /// <summary>
-        /// Turn applied to imported models. Blender's front view (-Y) arrives in Unity facing +Z, while placeholders are
-        /// built facing -Z; if a model ends up with its back to the street, change this to 0.
-        /// </summary>
-        const float ModelYawOffset = 180;
 
         readonly Dictionary<string, List<GameObject>> models = new Dictionary<string, List<GameObject>>();
         readonly Dictionary<string, Mesh> meshes = new Dictionary<string, Mesh>();
@@ -45,36 +40,42 @@ namespace Horizonte.Presentation
             }
         }
 
-        public static string Key(Structure type, int level)
+        public static string Key(Structure type, int level, int size = 1)
         {
             var def = Catalog.Get(type);
-            return def.IsZone ? $"{def.ModelId}_{level}" : def.ModelId;
+            if (!def.IsZone) return def.ModelId;
+            return size > 1 ? $"{def.ModelId}_{level}_{size}" : $"{def.ModelId}_{level}";
         }
 
-        public GameObject Create(Structure type, int level, int rotation, uint seed)
+        public bool HasModel(string key) => models.ContainsKey(key);
+
+        /// <summary>Object for a building; size is the side in lots of a zone building that grew over several lots.</summary>
+        public GameObject Create(Structure type, int level, int size, int rotation, uint seed)
         {
             var def = Catalog.Get(type);
             // Footprints that are not square can only turn half way round.
             if (def.Width != def.Height) rotation &= 2;
-            string key = Key(type, level);
+            string key = Key(type, level, size);
             GameObject go;
             if (models.TryGetValue(key, out var list))
             {
+                // Prepared models (Horizonte > Preparar edificios) already face -Z like the placeholders.
                 go = Object.Instantiate(list[(int)(seed % (uint)list.Count)]);
                 go.name = key;
-                go.transform.localRotation = Quaternion.Euler(0, rotation * 90 + ModelYawOffset, 0);
+                go.transform.localRotation = Quaternion.Euler(0, rotation * 90, 0);
                 return go;
             }
-            else
-            {
-                int variant = (int)(seed % 3);
-                string meshKey = $"{key}#{variant}";
-                if (!meshes.TryGetValue(meshKey, out var mesh)) meshes[meshKey] = mesh = Placeholder(type, level, variant);
-                go = new GameObject(key, typeof(MeshFilter), typeof(MeshRenderer));
-                go.GetComponent<MeshFilter>().sharedMesh = mesh;
-                go.GetComponent<MeshRenderer>().sharedMaterials = Materials(type);
-            }
+            string baseKey = Key(type, level);
+            int variant = (int)(seed % 3);
+            string meshKey = $"{baseKey}#{variant}";
+            if (!meshes.TryGetValue(meshKey, out var mesh)) meshes[meshKey] = mesh = Placeholder(type, level, variant);
+            go = new GameObject(key, typeof(MeshFilter), typeof(MeshRenderer));
+            go.GetComponent<MeshFilter>().sharedMesh = mesh;
+            go.GetComponent<MeshRenderer>().sharedMaterials = Materials(type);
             go.transform.localRotation = Quaternion.Euler(0, rotation * 90, 0);
+            // Placeholders were drawn for 8 m lots; stretch them to the lot and to buildings that span several lots.
+            float scale = T / 8f * size;
+            go.transform.localScale = Vector3.one * scale;
             return go;
         }
 

@@ -15,6 +15,8 @@ namespace Horizonte.Simulation
         public uint rng;
         public string name;
         public string terrain, structure, level, rotation;
+        /// <summary>Side of grown zone buildings; missing in saves from before lots could merge.</summary>
+        public string size;
 
         public static CitySave From(City city)
         {
@@ -39,6 +41,7 @@ namespace Horizonte.Simulation
                 structure = Convert.ToBase64String(structure),
                 level = Convert.ToBase64String(city.Level),
                 rotation = Convert.ToBase64String(city.Rotation),
+                size = Convert.ToBase64String(city.Size),
             };
         }
 
@@ -52,6 +55,8 @@ namespace Horizonte.Simulation
             var s = Convert.FromBase64String(structure);
             var l = Convert.FromBase64String(level);
             var r = Convert.FromBase64String(rotation);
+            var z = string.IsNullOrEmpty(size) ? null : Convert.FromBase64String(size);
+            if (z != null && z.Length != n) throw new InvalidOperationException("Corrupt save.");
             if (t.Length != n || s.Length != n || l.Length != n || r.Length != n) throw new InvalidOperationException("Corrupt save.");
             for (int i = 0; i < n; i++)
             {
@@ -59,6 +64,7 @@ namespace Horizonte.Simulation
                 city.Structure[i] = (Structure)s[i];
                 city.Level[i] = l[i];
                 city.Rotation[i] = r[i];
+                city.Size[i] = z == null || z[i] == 0 ? (byte)1 : z[i];
             }
             RebuildAnchors(city);
             city.Refresh();
@@ -73,9 +79,9 @@ namespace Horizonte.Simulation
             {
                 int i = city.Index(x, y);
                 if (city.Structure[i] == Structure.None || city.Anchor[i] >= 0) continue;
-                var def = Catalog.Get(city.Structure[i]);
-                for (int dy = 0; dy < def.Height; dy++)
-                for (int dx = 0; dx < def.Width; dx++)
+                int w = city.FootprintWidth(i), h = city.FootprintHeight(i);
+                for (int dy = 0; dy < h; dy++)
+                for (int dx = 0; dx < w; dx++)
                     if (city.InBounds(x + dx, y + dy)) city.Anchor[city.Index(x + dx, y + dy)] = i;
             }
         }

@@ -223,6 +223,11 @@ namespace Horizonte.Presentation
                     p.Poly(new[] { .5f, .44f, .96f, .62f, .5f, .32f, .04f, .62f }, true);
                     p.Poly(.5f, .86f, .96f, .62f, .5f, .4f, .04f, .62f).Line(.86f, .6f, .86f, .28f, .045f).Circle(.86f, .26f, .05f);
                     break;
+                case "flask":
+                    p.Box(.38f, .62f, .62f, .9f, .02f).Box(.32f, .86f, .68f, .93f, .02f);
+                    p.Poly(.38f, .66f, .62f, .66f, .9f, .14f, .86f, .07f, .14f, .07f, .1f, .14f);
+                    p.Poly(new[] { .45f, .62f, .55f, .62f, .55f, .9f, .45f, .9f }, true).Box(.24f, .36f, .76f, .4f, 0, true);
+                    break;
                 case "question":
                     p.Arc(.5f, .64f, .18f, .1f, -50, 180).Line(.62f, .5f, .5f, .4f, .1f).Line(.5f, .4f, .5f, .33f, .1f).Circle(.5f, .15f, .07f);
                     break;

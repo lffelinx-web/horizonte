@@ -3,14 +3,15 @@ using UnityEngine;
 
 namespace Horizonte.Presentation
 {
-    public enum Tool { Explore, Road, Residential, Commercial, Industrial, PowerPlant, Park, Police, School, Bulldoze }
+    public enum Tool { Explore, Road, Residential, Commercial, Industrial, PowerPlant, Park, Police, School, Doctor, Lab, Clinic, Emergency, Hospital, SpecialistHospital, Bulldoze }
 
     public static class Tools
     {
         public static readonly Tool[] All =
         {
             Tool.Explore, Tool.Road, Tool.Residential, Tool.Commercial, Tool.Industrial,
-            Tool.PowerPlant, Tool.Park, Tool.Police, Tool.School, Tool.Bulldoze,
+            Tool.PowerPlant, Tool.Park, Tool.Police, Tool.School,
+            Tool.Doctor, Tool.Lab, Tool.Clinic, Tool.Emergency, Tool.Hospital, Tool.SpecialistHospital, Tool.Bulldoze,
         };
 
         public static Structure ToStructure(Tool t)
@@ -25,6 +26,12 @@ namespace Horizonte.Presentation
                 case Tool.Park: return Structure.Park;
                 case Tool.Police: return Structure.Police;
                 case Tool.School: return Structure.School;
+                case Tool.Doctor: return Structure.Doctor;
+                case Tool.Lab: return Structure.Lab;
+                case Tool.Clinic: return Structure.Clinic;
+                case Tool.Emergency: return Structure.Emergency;
+                case Tool.Hospital: return Structure.Hospital;
+                case Tool.SpecialistHospital: return Structure.SpecialistHospital;
                 default: return Structure.None;
             }
         }
@@ -52,6 +59,12 @@ namespace Horizonte.Presentation
                 case Tool.Park: return new Color(.25f, .6f, .3f);
                 case Tool.Police: return new Color(.3f, .43f, .75f);
                 case Tool.School: return new Color(.82f, .45f, .25f);
+                case Tool.Doctor:
+                case Tool.Lab:
+                case Tool.Clinic:
+                case Tool.Emergency:
+                case Tool.Hospital:
+                case Tool.SpecialistHospital: return new Color(.86f, .32f, .34f);
                 case Tool.Bulldoze: return new Color(.92f, .35f, .3f);
                 default: return new Color(.85f, .85f, .85f);
             }
@@ -72,7 +85,8 @@ namespace Horizonte.Presentation
             new Category { Name = "Comercio", Icon = "shop", Tools = new[] { Tool.Commercial } },
             new Category { Name = "Industria", Icon = "factory", Tools = new[] { Tool.Industrial } },
             new Category { Name = "Energía", Icon = "bolt", Tools = new[] { Tool.PowerPlant } },
-            new Category { Name = "Servicios", Icon = "cross", Tools = new[] { Tool.Police, Tool.School } },
+            new Category { Name = "Servicios", Icon = "shield", Tools = new[] { Tool.Police, Tool.School } },
+            new Category { Name = "Salud", Icon = "cross", Tools = new[] { Tool.Doctor, Tool.Lab, Tool.Clinic, Tool.Emergency, Tool.Hospital, Tool.SpecialistHospital } },
             new Category { Name = "Parques", Icon = "tree", Tools = new[] { Tool.Park } },
             new Category { Name = "Demoler", Icon = "bulldoze", Tools = new[] { Tool.Bulldoze } },
         };
@@ -89,6 +103,12 @@ namespace Horizonte.Presentation
                 case Tool.Park: return "tree";
                 case Tool.Police: return "shield";
                 case Tool.School: return "school";
+                case Tool.Lab: return "flask";
+                case Tool.Doctor:
+                case Tool.Clinic:
+                case Tool.Emergency:
+                case Tool.Hospital:
+                case Tool.SpecialistHospital: return "cross";
                 case Tool.Bulldoze: return "bulldoze";
                 default: return "explore";
             }

@@ -10,7 +10,7 @@ namespace Horizonte.EditorTools
     /// </summary>
     public sealed class ModelImportRules : AssetPostprocessor
     {
-        const string Folder = "/Resources/Buildings/";
+        const string Folder = "/Modelos/";
 
         void OnPreprocessModel()
         {
@@ -24,7 +24,7 @@ namespace Horizonte.EditorTools
             importer.importAnimation = false;
             importer.animationType = ModelImporterAnimationType.None;
             importer.addCollider = false;
-            importer.isReadable = false;
+            importer.isReadable = true;
             importer.importBlendShapes = false;
         }
 

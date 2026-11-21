@@ -27,3 +27,9 @@
 # fastlane output
 /entrega/
 /fastlane/report.xml
+
+# Built from Assets/Modelos by Horizonte > Preparar edificios (runs before every build).
+/Assets/Generated/
+/Assets/Generated.meta
+/Assets/Resources/Buildings/
+/Assets/Resources/Buildings.meta

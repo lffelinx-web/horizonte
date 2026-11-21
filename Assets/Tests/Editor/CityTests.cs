@@ -127,6 +127,44 @@ namespace Horizonte.Tests
         }
 
         [Test]
+        public void HomesMergeIntoApartmentsAndAreBulldozedWhole()
+        {
+            var city = Flat();
+            city.Place(Structure.PowerPlant, 4, 8);
+            foreach (var (x, y) in City.Rect(0, 8, 1, 9)) city.Place(Structure.Residential, x, y);
+            foreach (var (x, y) in City.Rect(0, 8, 1, 9)) city.Level[city.Index(x, y)] = 1;
+            city.Refresh();
+            Assert.AreEqual(32, city.Population);
+            Assert.IsTrue(city.Upgrade(1, 9));
+            int anchor = city.Index(0, 8);
+            Assert.AreEqual(2, city.Size[anchor]);
+            Assert.AreEqual(anchor, city.Anchor[city.Index(1, 9)]);
+            Assert.AreEqual(4 * Catalog.Capacity(Structure.Residential, 2), city.Population);
+            var copy = CitySave.From(city).ToCity();
+            Assert.AreEqual(2, copy.Size[anchor]);
+            Assert.AreEqual(anchor, copy.Anchor[copy.Index(1, 9)]);
+            city.Bulldoze(1, 9);
+            city.Refresh();
+            Assert.AreEqual(Structure.None, city.Structure[anchor]);
+            Assert.AreEqual(0, city.Population);
+        }
+
+        [Test]
+        public void HealthBuildingsUnlockAndCoverHomes()
+        {
+            var city = Flat();
+            Assert.AreEqual(PlaceResult.Locked, city.Place(Structure.Hospital, 0, 0));
+            city.Place(Structure.PowerPlant, 4, 8);
+            city.Place(Structure.Residential, 0, 9);
+            city.Level[city.Index(0, 9)] = 1;
+            city.Refresh();
+            Assert.AreEqual(0, city.HealthCoverage);
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Structure.Doctor, 6, 8));
+            city.Refresh();
+            Assert.AreEqual(100, city.HealthCoverage);
+        }
+
+        [Test]
         public void LevelsFollowPopulation()
         {
             Assert.AreEqual(1, Progress.Level(0));

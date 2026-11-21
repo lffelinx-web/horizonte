@@ -99,7 +99,7 @@ namespace Horizonte.Presentation
         Text infoTitle, infoSubtitle, upkeepValue, demolishLabel;
         Btn demolishButton;
         readonly Card[] cards = new Card[4];
-        readonly Row[] rows = new Row[3];
+        readonly Row[] rows = new Row[4];
         Vector2Int selected = new Vector2Int(-1, -1);
 
         // Messages.
@@ -461,6 +461,7 @@ namespace Horizonte.Presentation
             }
             if (c.PowerSupply == 0 && consumers > 0) alerts.Add("No hay centrales eléctricas: sin luz nada crece.");
             else if (c.PowerDemand > c.PowerSupply) alerts.Add($"La energía no alcanza: faltan {N(c.PowerDemand - c.PowerSupply)} MW.");
+            if (c.Population >= 300 && c.HealthCoverage < 70) alerts.Add($"{100 - c.HealthCoverage} % de los habitantes no tiene servicio de salud cerca.");
             if (unpowered > 0 && c.PowerSupply > 0) alerts.Add($"{N(unpowered)} {(unpowered == 1 ? "lote o edificio" : "lotes o edificios")} sin electricidad.");
             if (noRoad > 0) alerts.Add($"{N(noRoad)} {(noRoad == 1 ? "lote" : "lotes")} sin calle conectada cerca.");
             if (isolated > 0) alerts.Add($"{N(isolated)} {(isolated == 1 ? "tramo" : "tramos")} de calle sin salida a la carretera.");
@@ -545,7 +546,7 @@ namespace Horizonte.Presentation
         void BuildBottomBar()
         {
             var cats = Tools.Categories;
-            const float w = 124, h = 94, gap = 6;
+            const float w = 112, h = 94, gap = 6;
             float width = cats.Length * w + (cats.Length - 1) * gap + 12;
             bottomBar = Rect("Construcción", safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 12), new Vector2(width, h + 12), new Vector2(.5f, 0));
             Panel(bottomBar, UiKit.PanelColor, 20);
@@ -588,7 +589,10 @@ namespace Horizonte.Presentation
             var button = categoryButtons[index].button.Root;
             float centre = button.anchoredPosition.x + button.sizeDelta.x * .5f - bottomBar.sizeDelta.x * .5f;
             const float cw = 200, ch = 140;
-            flyout = Rect("Menú " + cat.Name, safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(centre, 128), new Vector2(cat.Tools.Length * (cw + 8) + 8, ch + 16), new Vector2(.5f, 0));
+            float flyWidth = cat.Tools.Length * (cw + 8) + 8;
+            float limit = Mathf.Max(0, safe.rect.width * .5f - 12 - flyWidth * .5f);
+            centre = Mathf.Clamp(centre, -limit, limit);
+            flyout = Rect("Menú " + cat.Name, safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(centre, 128), new Vector2(flyWidth, ch + 16), new Vector2(.5f, 0));
             Panel(flyout, UiKit.PanelColor, 18);
             for (int k = 0; k < cat.Tools.Length; k++)
             {
@@ -601,7 +605,11 @@ namespace Horizonte.Presentation
                 b.Icon.rectTransform.anchoredPosition = new Vector2(cw * .5f, -40);
                 b.Icon.color = Tools.Swatch(tool) * 1.3f;
                 TextAt(b.Root, 0, 74, cw, 28, 21, TextAnchor.MiddleCenter, Color.white, true).text = Tools.Label(tool);
-                TextAt(b.Root, 0, 102, cw, 26, 19, TextAnchor.MiddleCenter, UiKit.Gold, true).text = Tools.CostLabel(tool);
+                int needed = Catalog.Get(Tools.ToStructure(tool))?.MinPopulation ?? 0;
+                bool locked = game.City.Population < needed;
+                var price = TextAt(b.Root, 0, 102, cw, 26, 19, TextAnchor.MiddleCenter, locked ? UiKit.Bad : UiKit.Gold, true);
+                price.text = locked ? $"Desde {N(needed)} hab." : Tools.CostLabel(tool);
+                if (locked) b.Icon.color = new Color(1, 1, 1, .35f);
                 b.Glow.gameObject.SetActive(tool == currentTool);
                 if (tool == currentTool) b.Back.color = UiKit.Accent;
             }
@@ -798,7 +806,7 @@ namespace Horizonte.Presentation
                 var tool = ToolOf(s);
                 infoTile.color = Tools.Swatch(tool);
                 infoIcon.sprite = Icons.Get(Tools.Icon(tool));
-                infoTitle.text = def.IsZone ? ZoneTitle(s, level) : def.Name;
+                infoTitle.text = def.IsZone ? ZoneTitle(s, level, c.Size[a]) : def.Name;
                 infoSubtitle.text = Subtitle(s, level);
                 upkeep = def.Upkeep;
                 demolish = $"Demoler  ·  $ {Catalog.BulldozeCost}";
@@ -808,13 +816,14 @@ namespace Horizonte.Presentation
                 {
                     bool homes = s == Structure.Residential;
                     AddCard("level", blue, "Nivel", $"{level} / {Catalog.MaxLevel}", Color.white, level / (float)Catalog.MaxLevel);
-                    AddCard(homes ? "people" : "briefcase", blue, homes ? "Habitantes" : "Empleos", N(Catalog.Capacity(s, level)), Color.white);
+                    AddCard(homes ? "people" : "briefcase", blue, homes ? "Habitantes" : "Empleos", N(Catalog.Capacity(s, level) * c.Size[a] * c.Size[a]), Color.white);
                     AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
                     AddCard("road", blue, "Calle cercana", access, accessColor);
-                    AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{Catalog.PowerUse(s, level)} MW", Color.white);
+                    AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{Catalog.PowerUse(s, level) * c.Size[a] * c.Size[a]} MW", Color.white);
                     AddRow("star", UiKit.Gold, "Atractivo del lugar", Signed(desire), desireColor);
                     int d = Mathf.RoundToInt(c.Demand(s) * 100);
                     AddRow("chart", blue, "Demanda de la zona", $"{(d > 0 ? "+" : "")}{d} %", d > 0 ? UiKit.Good : d < 0 ? UiKit.Bad : Color.white);
+                    if (homes) AddRow("cross", new Color(1f, .55f, .55f), "Servicio de salud", c.HealthCover[i] ? "Sí" : "No", c.HealthCover[i] ? UiKit.Good : UiKit.Bad);
                 }
                 else if (s == Structure.Road)
                 {
@@ -832,6 +841,16 @@ namespace Horizonte.Presentation
                     AddRow("bolt", UiKit.Warn, "Consumo de la ciudad", $"{N(c.PowerDemand)} MW", Color.white);
                     AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), UiKit.Bad);
                 }
+                else if (def.IsHealth)
+                {
+                    AddCard("radius", blue, "Alcance", $"{def.Radius} casillas", Color.white);
+                    AddCard("people", blue, "Cobertura", $"{c.HealthCoverage} %", Color.white, c.HealthCoverage / 100f);
+                    AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
+                    AddCard("road", blue, "Calle cercana", access, accessColor);
+                    AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{def.PowerUse} MW", Color.white);
+                    AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), UiKit.Good);
+                    AddRow("level", blue, "Tamaño", $"{def.Width} × {def.Height} casillas", Color.white);
+                }
                 else
                 {
                     AddCard("radius", blue, "Alcance", $"{def.Radius} casillas", Color.white);
@@ -841,7 +860,7 @@ namespace Horizonte.Presentation
                     AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{Catalog.PowerUse(s, level)} MW", Color.white);
                     AddRow("star", UiKit.Gold, "Atractivo del lugar", Signed(desire), desireColor);
                 }
-                game.View.SetSelection(a % c.Width, a / c.Width, def.Width, def.Height);
+                game.View.SetSelection(a % c.Width, a / c.Width, c.FootprintWidth(a), c.FootprintHeight(a));
             }
 
             // Stack the sections that are in use.
@@ -870,10 +889,10 @@ namespace Horizonte.Presentation
             infoPanel.sizeDelta = new Vector2(430, y + 2);
         }
 
-        static string ZoneTitle(Structure s, int level)
+        static string ZoneTitle(Structure s, int level, int size)
         {
             if (level == 0) return s == Structure.Residential ? "Lote residencial" : s == Structure.Commercial ? "Lote comercial" : "Lote industrial";
-            string[] names = s == Structure.Residential ? new[] { "Casas", "Departamentos", "Torre residencial" }
+            string[] names = s == Structure.Residential ? new[] { "Casa", size >= 4 ? "Conjunto residencial" : "Apartamentos", "Torre residencial" }
                 : s == Structure.Commercial ? new[] { "Tienda", "Oficinas", "Torre de oficinas" }
                 : new[] { "Taller", "Fábrica", "Planta industrial" };
             return names[Mathf.Clamp(level, 1, 3) - 1];
@@ -891,6 +910,12 @@ namespace Horizonte.Presentation
                 case Structure.Park: return "Recreación";
                 case Structure.Police: return "Seguridad  ·  servicio público";
                 case Structure.School: return "Educación  ·  servicio público";
+                case Structure.Doctor:
+                case Structure.Lab:
+                case Structure.Clinic:
+                case Structure.Emergency:
+                case Structure.Hospital:
+                case Structure.SpecialistHospital: return "Salud  ·  servicio público";
                 default: return "";
             }
         }

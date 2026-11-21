@@ -11,7 +11,7 @@ namespace Horizonte.Presentation
     public sealed class CityView : MonoBehaviour
     {
         /// <summary>Metres per grid tile.</summary>
-        public const float TileSize = 8;
+        public const float TileSize = 10;
         const int ChunkSize = 16;
         const float WaterLevel = -.9f;
 
@@ -193,7 +193,8 @@ namespace Horizonte.Presentation
                 default:
                     // Service buildings stand on a paved lot.
                     builder.Flat(SGrass, x0, z0, x1, z1, 0);
-                    if (s != Structure.Park) builder.Flat(SSidewalk, x0, z0, x1, z1, .03f);
+                    // Health models bring their own gardens and paths.
+                    if (s != Structure.Park && !Catalog.Get(s).IsHealth) builder.Flat(SSidewalk, x0, z0, x1, z1, .03f);
                     break;
             }
 
@@ -313,11 +314,13 @@ namespace Horizonte.Presentation
             if (s == Structure.None || s == Structure.Road || city.Anchor[i] != i) return;
             var def = Catalog.Get(s);
             if (def.IsZone && city.Level[i] == 0) return;
-            var go = factory.Create(s, city.Level[i], city.Rotation[i], Hash(i % city.Width, i / city.Width));
+            int w = city.FootprintWidth(i), h = city.FootprintHeight(i);
+            var go = factory.Create(s, city.Level[i], def.IsZone ? w : 1, city.Rotation[i], Hash(i % city.Width, i / city.Width));
             if (go == null) return;
             int x = i % city.Width, y = i / city.Width;
             go.transform.SetParent(buildingRoot, false);
-            go.transform.localPosition = new Vector3((x + def.Width * .5f) * TileSize, 0, (y + def.Height * .5f) * TileSize);
+            // A few centimetres up so the lot drawn in the model covers the zone colour underneath.
+            go.transform.localPosition = new Vector3((x + w * .5f) * TileSize, .05f, (y + h * .5f) * TileSize);
             buildings[i] = go;
         }
     }

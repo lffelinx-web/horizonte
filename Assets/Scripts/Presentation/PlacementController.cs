@@ -283,13 +283,14 @@ namespace Horizonte.Presentation
             if (problem != PlaceResult.Ok && (placed == 0 || problem == PlaceResult.NoMoney)) hud.Toast(Message(problem));
         }
 
-        static string Message(PlaceResult r)
+        string Message(PlaceResult r)
         {
             switch (r)
             {
                 case PlaceResult.NoMoney: return "No alcanza el dinero";
                 case PlaceResult.Water: return "No se puede construir sobre el agua";
                 case PlaceResult.OutOfBounds: return "Fuera del terreno de la ciudad";
+                case PlaceResult.Locked: return $"Se desbloquea con {Hud.N(Catalog.Get(Tools.ToStructure(Tool)).MinPopulation)} habitantes";
                 default: return "Ese lugar ya está ocupado";
             }
         }

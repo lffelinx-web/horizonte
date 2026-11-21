@@ -55,6 +55,7 @@ namespace Horizonte.Simulation
             G("Construye un parque", 1, c => c.Count(Structure.Park)),
             G("Alcanza 500 habitantes", 500, c => c.Population),
             G("Construye una escuela", 1, c => c.Count(Structure.School)),
+            G("Construye un consultorio", 1, c => c.Count(Structure.Doctor)),
             G("Construye una estación de policía", 1, c => c.Count(Structure.Police)),
             G("Alcanza 1 000 habitantes", 1000, c => c.Population),
             G("Ahorra $ 50 000", 50000, c => c.Money),

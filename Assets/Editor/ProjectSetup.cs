@@ -29,6 +29,7 @@ namespace Horizonte.EditorTools
             ConfigurePlayer();
             ConfigurePipeline();
             CreateMaterials();
+            BuildingBaker.Bake();
             CreateScene();
             AssetDatabase.SaveAssets();
             Debug.Log("Horizonte: project configured.");

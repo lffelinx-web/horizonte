@@ -40,7 +40,7 @@ namespace Horizonte.Presentation
             Placement = gameObject.AddComponent<PlacementController>();
 
             bool demo = HasArg("-demo");
-            City = demo ? Demo.Build() : Load() ?? CityGenerator.Create();
+            City = HasArg("-vitrina") ? Demo.Showcase() : demo ? Demo.Build() : Load() ?? CityGenerator.Create();
             Attach(cam);
             Hud.Init(this);
             Placement.Init(this, Rig, Hud);
@@ -55,7 +55,7 @@ namespace Horizonte.Presentation
             View.Init(City);
             Rig.Init(cam, new Vector2(City.Width, City.Height) * CityView.TileSize);
             Rig.Focus = CityView.TileCentre(City.Width / 2 - 6, City.Height / 2);
-            Rig.Distance = 150;
+            Rig.Distance = 190;
         }
 
         void Update()
@@ -124,7 +124,7 @@ namespace Horizonte.Presentation
 
         public void Save()
         {
-            if (City == null || HasArg("-demo")) return;
+            if (City == null || HasArg("-demo") || HasArg("-vitrina")) return;
             try
             {
                 File.WriteAllText(SavePath + ".tmp", JsonUtility.ToJson(CitySave.From(City)));
@@ -162,12 +162,42 @@ namespace Horizonte.Presentation
             return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
         }
 
+        IEnumerator CloseUp(string folder, string file, Func<int, bool> pick, float distance)
+        {
+            for (int i = 0; i < City.Structure.Length; i++)
+            {
+                if (City.Anchor[i] != i || !pick(i)) continue;
+                int w = City.FootprintWidth(i), h = City.FootprintHeight(i);
+                Rig.Focus = new Vector3((i % City.Width + w * .5f) * CityView.TileSize, 0, (i / City.Width + h * .5f) * CityView.TileSize);
+                Rig.Yaw = 0;
+                Rig.Distance = distance;
+                for (int f = 0; f < 10; f++) yield return null;
+                ScreenCapture.CaptureScreenshot(Path.Combine(folder, file));
+                yield return null;
+                yield return null;
+                yield break;
+            }
+        }
+
         /// <summary>Saves screenshots from a few angles and quits. Used to check the look without a device.</summary>
         IEnumerator Capture(string folder)
         {
             Directory.CreateDirectory(folder);
             SetSpeed(0);
-            var shots = new[] { (yaw: 30f, dist: 150f), (yaw: 120f, dist: 70f), (yaw: 210f, dist: 330f) };
+            if (HasArg("-vitrina"))
+            {
+                int shot = 0;
+                for (int i = 0; i < City.Structure.Length; i++)
+                {
+                    var s = City.Structure[i];
+                    if (City.Anchor[i] != i || s == Simulation.Structure.Road || s == Simulation.Structure.PowerPlant) continue;
+                    float size = Mathf.Max(City.FootprintWidth(i), City.FootprintHeight(i)) * CityView.TileSize;
+                    yield return CloseUp(folder, $"vitrina_{++shot:00}.png", j => j == i, size * 1.6f + 30);
+                }
+                Application.Quit();
+                yield break;
+            }
+            var shots = new[] { (yaw: 30f, dist: 190f), (yaw: 120f, dist: 90f), (yaw: 210f, dist: 410f) };
             for (int k = 0; k < shots.Length; k++)
             {
                 Rig.Yaw = shots[k].yaw;
@@ -185,12 +215,18 @@ namespace Horizonte.Presentation
                     if (City.Structure[i] == Simulation.Structure.Residential && City.Level[i] > City.Level[best]) best = i;
                 Rig.Focus = CityView.TileCentre(best % City.Width, best / City.Width);
                 Rig.Yaw = 35;
-                Rig.Distance = 110;
+                Rig.Distance = 140;
                 Inspect(best % City.Width, best / City.Width);
                 for (int f = 0; f < 10; f++) yield return null;
                 ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_interfaz.png"));
                 yield return null;
                 yield return null;
+
+                // Close-ups to check that models face the street (rotation 0 faces south, toward a camera at yaw 0).
+                Hud.HideInfo();
+                yield return CloseUp(folder, "captura_casa.png", i => City.Structure[i] == Simulation.Structure.Residential && City.Level[i] == 1 && City.Rotation[i] == 0, 45);
+                yield return CloseUp(folder, "captura_edificios.png", i => City.Structure[i] == Simulation.Structure.Residential && City.Size[i] >= 2 && City.Rotation[i] == 0, 110);
+                yield return CloseUp(folder, "captura_salud.png", i => City.Structure[i] == Simulation.Structure.Clinic, 90);
 
                 // Pop-up, building menu and a message.
                 SelectTool(Tool.Explore);
