@@ -6,7 +6,8 @@ namespace Horizonte.Simulation
     [Serializable]
     public sealed class CitySave
     {
-        public const int CurrentVersion = 1;
+        /// <summary>Version 2: buildings placed by hand from the catalog (version 1 had zones).</summary>
+        public const int CurrentVersion = 2;
 
         public int version = CurrentVersion;
         public int width, height;
@@ -14,19 +15,32 @@ namespace Horizonte.Simulation
         public int day, taxRate;
         public uint rng;
         public string name;
-        public string terrain, structure, level, rotation;
-        /// <summary>Side of grown zone buildings; missing in saves from before lots could merge.</summary>
-        public string size;
+        /// <summary>Terrain and rotation are one byte per tile; buildings are catalog models by name; occupants four bytes.</summary>
+        public string terrain, building, rotation, occupants;
+        public string[] models;
 
         public static CitySave From(City city)
         {
             int n = city.Width * city.Height;
             var terrain = new byte[n];
-            var structure = new byte[n];
+            var building = new byte[n * 2];
+            var occupants = new byte[n * 4];
+            // Buildings are saved through a table of model names so later catalog changes keep old saves readable.
+            var table = new System.Collections.Generic.List<string> { "" };
+            var lookup = new System.Collections.Generic.Dictionary<ushort, ushort> { [Catalog.None] = 0 };
             for (int i = 0; i < n; i++)
             {
                 terrain[i] = (byte)city.Terrain[i];
-                structure[i] = (byte)city.Structure[i];
+                ushort id = city.Building[i];
+                if (!lookup.TryGetValue(id, out ushort code))
+                {
+                    code = (ushort)table.Count;
+                    table.Add(Catalog.Get(id).Model);
+                    lookup[id] = code;
+                }
+                building[i * 2] = (byte)code;
+                building[i * 2 + 1] = (byte)(code >> 8);
+                BitConverter.GetBytes(city.Occupants[i]).CopyTo(occupants, i * 4);
             }
             return new CitySave
             {
@@ -38,51 +52,61 @@ namespace Horizonte.Simulation
                 rng = city.RngState,
                 name = city.Name,
                 terrain = Convert.ToBase64String(terrain),
-                structure = Convert.ToBase64String(structure),
-                level = Convert.ToBase64String(city.Level),
+                building = Convert.ToBase64String(building),
                 rotation = Convert.ToBase64String(city.Rotation),
-                size = Convert.ToBase64String(city.Size),
+                occupants = Convert.ToBase64String(occupants),
+                models = table.ToArray(),
             };
         }
 
         public City ToCity()
         {
-            if (version != CurrentVersion) throw new InvalidOperationException($"Unknown save version {version}.");
+            if (version != CurrentVersion) throw new InvalidOperationException($"Save version {version} is from an older game.");
             var city = new City(width, height, rng) { Money = money, Day = day, TaxRate = taxRate };
             if (!string.IsNullOrEmpty(name)) city.Name = name;
             int n = width * height;
             var t = Convert.FromBase64String(terrain);
-            var s = Convert.FromBase64String(structure);
-            var l = Convert.FromBase64String(level);
+            var b = Convert.FromBase64String(building);
             var r = Convert.FromBase64String(rotation);
-            var z = string.IsNullOrEmpty(size) ? null : Convert.FromBase64String(size);
-            if (z != null && z.Length != n) throw new InvalidOperationException("Corrupt save.");
-            if (t.Length != n || s.Length != n || l.Length != n || r.Length != n) throw new InvalidOperationException("Corrupt save.");
+            var o = Convert.FromBase64String(occupants);
+            if (t.Length != n || b.Length != n * 2 || r.Length != n || o.Length != n * 4) throw new InvalidOperationException("Corrupt save.");
+            var ids = new ushort[models.Length];
+            for (int k = 1; k < models.Length; k++) ids[k] = Catalog.Get(models[k])?.Id ?? Catalog.None;
             for (int i = 0; i < n; i++)
             {
                 city.Terrain[i] = (Terrain)t[i];
-                city.Structure[i] = (Structure)s[i];
-                city.Level[i] = l[i];
+                int code = b[i * 2] | (b[i * 2 + 1] << 8);
+                city.Building[i] = code < ids.Length ? ids[code] : Catalog.None;
                 city.Rotation[i] = r[i];
-                city.Size[i] = z == null || z[i] == 0 ? (byte)1 : z[i];
+                city.Occupants[i] = BitConverter.ToInt32(o, i * 4);
             }
             RebuildAnchors(city);
             city.Refresh();
             return city;
         }
 
-        /// <summary>Multi-tile buildings are rebuilt by scanning from their south-west corner.</summary>
+        /// <summary>Buildings are rebuilt by scanning from their south-west corner; anything that no longer fits is dropped.</summary>
         static void RebuildAnchors(City city)
         {
             for (int y = 0; y < city.Height; y++)
             for (int x = 0; x < city.Width; x++)
             {
                 int i = city.Index(x, y);
-                if (city.Structure[i] == Structure.None || city.Anchor[i] >= 0) continue;
-                int w = city.FootprintWidth(i), h = city.FootprintHeight(i);
-                for (int dy = 0; dy < h; dy++)
-                for (int dx = 0; dx < w; dx++)
-                    if (city.InBounds(x + dx, y + dy)) city.Anchor[city.Index(x + dx, y + dy)] = i;
+                if (city.Building[i] == Catalog.None || city.Anchor[i] >= 0) continue;
+                var def = Catalog.Get(city.Building[i]);
+                bool fits = true;
+                for (int dy = 0; dy < def.Height && fits; dy++)
+                for (int dx = 0; dx < def.Width && fits; dx++)
+                    fits = city.InBounds(x + dx, y + dy) && city.Building[city.Index(x + dx, y + dy)] == def.Id && city.Anchor[city.Index(x + dx, y + dy)] < 0;
+                if (!fits)
+                {
+                    city.Building[i] = Catalog.None;
+                    city.Occupants[i] = 0;
+                    continue;
+                }
+                for (int dy = 0; dy < def.Height; dy++)
+                for (int dx = 0; dx < def.Width; dx++)
+                    city.Anchor[city.Index(x + dx, y + dy)] = i;
             }
         }
     }

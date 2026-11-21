@@ -87,7 +87,7 @@ namespace Horizonte.Presentation
                 dirtyChunks.Add(i);
             }
             BuildSurroundings();
-            for (int i = 0; i < city.Structure.Length; i++) RefreshBuilding(i);
+            for (int i = 0; i < city.Building.Length; i++) RefreshBuilding(i);
             RebuildDirty();
         }
 
@@ -165,37 +165,30 @@ namespace Horizonte.Presentation
             int i = city.Index(x, y);
             float x0 = x * TileSize, z0 = y * TileSize, x1 = x0 + TileSize, z1 = z0 + TileSize;
             var terrain = city.Terrain[i];
+            var def = city.DefAt(i);
             if (terrain == Simulation.Terrain.Water)
             {
                 builder.Flat(SBank, x0, z0, x1, z1, WaterLevel - 1.2f);
+                if (def == null || !def.Bridge) return;
+                // Bridge: a deck at street level on two piers.
+                builder.Box(SSidewalk, new Vector3(x0 + TileSize * .5f, -.7f, z0 + TileSize * .5f), new Vector3(TileSize, .7f, TileSize));
+                builder.Box(SSidewalk, new Vector3(x0 + TileSize * .5f, WaterLevel - 1.2f, z0 + TileSize * .5f), new Vector3(1.6f, -WaterLevel + .5f, 1.6f));
+                BuildRoad(x, y, x0, z0, false);
                 return;
             }
 
-            var s = city.Structure[i];
-            switch (s)
+            if (def == null)
             {
-                case Structure.Road: BuildRoad(x, y, x0, z0); break;
-                case Structure.Residential:
-                case Structure.Commercial:
-                case Structure.Industrial:
-                    builder.Flat(SGrass, x0, z0, x1, z1, 0);
-                    if (city.Level[i] == 0)
-                    {
-                        int slot = s == Structure.Residential ? SZoneR : s == Structure.Commercial ? SZoneC : SZoneI;
-                        builder.Flat(slot, x0 + .5f, z0 + .5f, x1 - .5f, z1 - .5f, .03f);
-                    }
-                    else builder.Flat(s == Structure.Residential ? SYard : SSidewalk, x0 + .2f, z0 + .2f, x1 - .2f, z1 - .2f, .03f);
-                    break;
-                case Structure.None:
-                    builder.Flat(terrain == Simulation.Terrain.Forest ? SForest : SGrass, x0, z0, x1, z1, 0);
-                    if (terrain == Simulation.Terrain.Forest) BuildTrees(x, y);
-                    break;
-                default:
-                    // Service buildings stand on a paved lot.
-                    builder.Flat(SGrass, x0, z0, x1, z1, 0);
-                    // Health models bring their own gardens and paths.
-                    if (s != Structure.Park && !Catalog.Get(s).IsHealth) builder.Flat(SSidewalk, x0, z0, x1, z1, .03f);
-                    break;
+                builder.Flat(terrain == Simulation.Terrain.Forest ? SForest : SGrass, x0, z0, x1, z1, 0);
+                if (terrain == Simulation.Terrain.Forest) BuildTrees(x, y);
+            }
+            else if (def.IsRoad) BuildRoad(x, y, x0, z0, def.Id == Catalog.Avenue);
+            else
+            {
+                builder.Flat(SGrass, x0, z0, x1, z1, 0);
+                // Homes stand in gardens, parks on grass; the rest on a paved lot until their model brings its own.
+                if (def.Category == Category.Housing) builder.Flat(SYard, x0 + .2f, z0 + .2f, x1 - .2f, z1 - .2f, .03f);
+                else if (def.Floors > 0 && !factory.HasModel(def)) builder.Flat(SSidewalk, x0, z0, x1, z1, .03f);
             }
 
             // River banks: earth walls down to the water where land meets it.
@@ -219,10 +212,10 @@ namespace Horizonte.Presentation
             int nx = x + City.DX[d], ny = y + City.DY[d];
             // Roads on the edge of the map continue into the outside world.
             if (!city.InBounds(nx, ny)) return true;
-            return city.Structure[city.Index(nx, ny)] == Structure.Road;
+            return city.IsRoad(nx, ny);
         }
 
-        void BuildRoad(int x, int y, float x0, float z0)
+        void BuildRoad(int x, int y, float x0, float z0, bool avenue)
         {
             const float curb = 1.3f, sidewalkHeight = .12f, lineWidth = .14f;
             float x1 = x0 + TileSize, z1 = z0 + TileSize;
@@ -247,8 +240,14 @@ namespace Horizonte.Presentation
             if (!w) Sidewalk(x0, z0 + curb, x0 + curb, z1 - curb, sidewalkHeight);
             if (!e) Sidewalk(x1 - curb, z0 + curb, x1, z1 - curb, sidewalkHeight);
 
-            // Dashed centre lines; none inside junctions.
+            // Dashed centre lines; none inside junctions. Avenues get a planted median instead.
             if (links > 2) return;
+            if (avenue)
+            {
+                if (s || n || links == 0) builder.Box(SYard, new Vector3(mx, 0, (s ? z0 : mz - .6f) * .5f + (n ? z1 : mz + .6f) * .5f), new Vector3(1.2f, .18f, (n ? z1 : mz + .6f) - (s ? z0 : mz - .6f)));
+                if (w || e) builder.Box(SYard, new Vector3((w ? x0 : mx - .6f) * .5f + (e ? x1 : mx + .6f) * .5f, 0, mz), new Vector3((e ? x1 : mx + .6f) - (w ? x0 : mx - .6f), .18f, 1.2f));
+                return;
+            }
             const float dash = 1.4f, lineY = .04f;
             if (s || n || links == 0)
             {
@@ -310,16 +309,14 @@ namespace Horizonte.Presentation
                 Destroy(old);
                 buildings.Remove(i);
             }
-            var s = city.Structure[i];
-            if (s == Structure.None || s == Structure.Road || city.Anchor[i] != i) return;
-            var def = Catalog.Get(s);
-            if (def.IsZone && city.Level[i] == 0) return;
-            int w = city.FootprintWidth(i), h = city.FootprintHeight(i);
-            var go = factory.Create(s, city.Level[i], def.IsZone ? w : 1, city.Rotation[i], Hash(i % city.Width, i / city.Width));
+            var def = city.DefAt(i);
+            if (def == null || def.IsRoad || city.Anchor[i] != i) return;
+            int w = def.Width, h = def.Height;
+            var go = factory.Create(def, city.Rotation[i], Hash(i % city.Width, i / city.Width));
             if (go == null) return;
             int x = i % city.Width, y = i / city.Width;
             go.transform.SetParent(buildingRoot, false);
-            // A few centimetres up so the lot drawn in the model covers the zone colour underneath.
+            // A few centimetres up so the lot drawn in the model covers the ground underneath.
             go.transform.localPosition = new Vector3((x + w * .5f) * TileSize, .05f, (y + h * .5f) * TileSize);
             buildings[i] = go;
         }

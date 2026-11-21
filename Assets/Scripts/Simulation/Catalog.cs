@@ -1,115 +1,306 @@
+using System.Collections.Generic;
+
 namespace Horizonte.Simulation
 {
     public enum Terrain : byte { Grass, Water, Forest }
 
-    public enum Structure : byte
-    {
-        None,
-        Road,
-        Residential,
-        Commercial,
-        Industrial,
-        PowerPlant,
-        Park,
-        Police,
-        School,
-        Doctor,
-        Lab,
-        Clinic,
-        Emergency,
-        Hospital,
-        SpecialistHospital,
-    }
+    /// <summary>Groups on the building bar, in the order of the concept sheets.</summary>
+    public enum Category : byte { Transport, Housing, Commerce, Industry, Energy, Water, Safety, Education, Health, Parks }
 
-    /// <summary>Fixed data for everything the player can place.</summary>
-    public sealed class StructureDef
+    /// <summary>What a building does in the simulation.</summary>
+    public enum Kind : byte { Road, Housing, Jobs, Power, Service }
+
+    /// <summary>City services a building can cover within its radius.</summary>
+    public enum Service : byte { None, Health, Education, Safety, Fire, Water, Sewage, Waste, Culture, Transit }
+
+    /// <summary>Fixed data for everything the player can build. One tile is 10 x 10 m.</summary>
+    public sealed class BuildingDef
     {
-        public Structure Type;
-        /// <summary>Base name of the 3D model in Resources/Buildings (zones add the level, and the size when bigger than one lot).</summary>
-        public string ModelId;
+        public ushort Id;
+        /// <summary>Name of the 3D model in Resources/Buildings ("_b", "_c"… variants are picked at random).</summary>
+        public string Model;
         public string Name;
+        public Category Category;
+        public Kind Kind;
         public int Cost;
-        /// <summary>Monthly upkeep, per tile for roads.</summary>
+        /// <summary>Monthly upkeep (per tile for roads).</summary>
         public int Upkeep;
         public int Width = 1, Height = 1;
-        public bool IsZone;
-        /// <summary>Power the building supplies to the grid.</summary>
-        public int PowerSupply;
-        /// <summary>Power a service building draws from the grid.</summary>
-        public int PowerUse = 2;
-        /// <summary>Tiles around the building that feel its effect.</summary>
-        public int Radius;
-        /// <summary>Desirability added at the centre of the radius, fading to zero at its edge.</summary>
-        public int Desirability;
-        /// <summary>Gives medical care to homes within its radius.</summary>
-        public bool IsHealth;
         /// <summary>Residents the city needs before it can be built.</summary>
         public int MinPopulation;
+        /// <summary>People who can live here.</summary>
+        public int Residents;
+        /// <summary>Jobs it offers once it has power and a connected street.</summary>
+        public int Jobs;
+        /// <summary>True for factories and farms (industrial jobs), false for shops and offices.</summary>
+        public bool Industrial;
+        public int PowerSupply;
+        /// <summary>Tiles around a plant or substation that its power lines reach.</summary>
+        public int PowerReach;
+        public int PowerUse;
+        public Service Service;
+        /// <summary>Tiles covered by the service.</summary>
+        public int Radius;
+        /// <summary>Desirability at the centre, fading to zero at <see cref="DesireRadius"/>.</summary>
+        public int Desirability;
+        public int DesireRadius;
+        /// <summary>Satisfaction added to the whole city (town hall and similar).</summary>
+        public int CityBonus;
+        /// <summary>Must stand on the river bank (hydroelectric dam).</summary>
+        public bool NeedsWater;
+        /// <summary>Road that can be laid over water.</summary>
+        public bool Bridge;
+        /// <summary>Floors, for the placeholder drawn until the model exists.</summary>
+        public int Floors = 1;
+        /// <summary>One line for the building menu.</summary>
+        public string Summary;
+
+        public bool IsRoad => Kind == Kind.Road;
     }
 
     public static class Catalog
     {
+        public const ushort None = 0;
         public const int ClearForestCost = 5;
         public const int BulldozeCost = 5;
 
-        static readonly StructureDef[] defs =
+        public static readonly ushort Road, Avenue, Bridge;
+        static readonly List<BuildingDef> defs = new List<BuildingDef> { null };
+        static readonly Dictionary<string, BuildingDef> byModel = new Dictionary<string, BuildingDef>();
+
+        public static IReadOnlyList<BuildingDef> All => defs;
+        public static BuildingDef Get(ushort id) => id < defs.Count ? defs[id] : null;
+        public static BuildingDef Get(string model) => byModel.TryGetValue(model, out var d) ? d : null;
+
+        public static IEnumerable<BuildingDef> InCategory(Category c)
         {
-            null,
-            new StructureDef { Type = Structure.Road, ModelId = "calle", Name = "Calle", Cost = 10, Upkeep = 1 },
-            new StructureDef { Type = Structure.Residential, ModelId = "residencial", Name = "Residencial", Cost = 20, IsZone = true },
-            new StructureDef { Type = Structure.Commercial, ModelId = "comercial", Name = "Comercial", Cost = 25, IsZone = true },
-            new StructureDef { Type = Structure.Industrial, ModelId = "industrial", Name = "Industrial", Cost = 25, IsZone = true, Radius = 5, Desirability = -35 },
-            new StructureDef { Type = Structure.PowerPlant, ModelId = "central_electrica", Name = "Central eléctrica", Cost = 3000, Upkeep = 120, Width = 2, Height = 2, PowerSupply = 400, Radius = 6, Desirability = -30 },
-            new StructureDef { Type = Structure.Park, ModelId = "parque", Name = "Parque", Cost = 150, Upkeep = 5, Radius = 4, Desirability = 30 },
-            new StructureDef { Type = Structure.Police, ModelId = "policia", Name = "Policía", Cost = 700, Upkeep = 60, Radius = 9, Desirability = 15 },
-            new StructureDef { Type = Structure.School, ModelId = "escuela", Name = "Escuela", Cost = 900, Upkeep = 80, Width = 2, Height = 1, Radius = 9, Desirability = 20 },
-            // Health: footprints follow the real size of the models (one tile is 10 m).
-            new StructureDef { Type = Structure.Doctor, ModelId = "consultorio", Name = "Consultorio", Cost = 1200, Upkeep = 60, Width = 2, Height = 2, PowerUse = 3, Radius = 8, Desirability = 8, IsHealth = true },
-            new StructureDef { Type = Structure.Lab, ModelId = "laboratorio", Name = "Laboratorio médico", Cost = 2500, Upkeep = 110, Width = 3, Height = 2, PowerUse = 4, Radius = 10, Desirability = 6, IsHealth = true, MinPopulation = 300 },
-            new StructureDef { Type = Structure.Clinic, ModelId = "clinica", Name = "Clínica comunitaria", Cost = 3500, Upkeep = 150, Width = 3, Height = 2, PowerUse = 4, Radius = 12, Desirability = 10, IsHealth = true, MinPopulation = 600 },
-            new StructureDef { Type = Structure.Emergency, ModelId = "urgencias", Name = "Centro de urgencias", Cost = 6000, Upkeep = 260, Width = 3, Height = 3, PowerUse = 6, Radius = 15, Desirability = 8, IsHealth = true, MinPopulation = 1200 },
-            new StructureDef { Type = Structure.Hospital, ModelId = "hospital_general", Name = "Hospital general", Cost = 12000, Upkeep = 480, Width = 4, Height = 4, PowerUse = 10, Radius = 20, Desirability = 12, IsHealth = true, MinPopulation = 2500 },
-            new StructureDef { Type = Structure.SpecialistHospital, ModelId = "hospital_especializado", Name = "Hospital especializado", Cost = 20000, Upkeep = 800, Width = 5, Height = 4, PowerUse = 14, Radius = 26, Desirability = 15, IsHealth = true, MinPopulation = 6000 },
-        };
+            foreach (var d in defs) if (d != null && d.Category == c) yield return d;
+        }
 
-        public static StructureDef Get(Structure type) => defs[(int)type];
-
-        public const int MaxLevel = 3;
-
-        /// <summary>Residents or jobs a zone tile holds at each level (a building on several lots holds this on each one).</summary>
-        public static int Capacity(Structure zone, int level)
+        static BuildingDef Add(string model, string name, Category category, Kind kind, int cost, int upkeep, int w, int h, int floors, int minPop = 0)
         {
-            if (level <= 0) return 0;
-            switch (zone)
+            var d = new BuildingDef
             {
-                case Structure.Residential: return level == 1 ? 8 : level == 2 ? 30 : 90;
-                case Structure.Commercial: return level == 1 ? 6 : level == 2 ? 20 : 55;
-                case Structure.Industrial: return level == 1 ? 10 : level == 2 ? 30 : 60;
-                default: return 0;
+                Id = (ushort)defs.Count, Model = model, Name = name, Category = category, Kind = kind,
+                Cost = cost, Upkeep = upkeep, Width = w, Height = h, Floors = floors, MinPopulation = minPop,
+            };
+            defs.Add(d);
+            byModel[model] = d;
+            return d;
+        }
+
+        static BuildingDef Home(string model, string name, int cost, int w, int h, int floors, int residents, int minPop = 0, Category category = Category.Housing)
+        {
+            var d = Add(model, name, category, Kind.Housing, cost, 0, w, h, floors, minPop);
+            d.Residents = residents;
+            d.PowerUse = System.Math.Max(1, residents / 8);
+            d.Summary = $"{residents} habitantes";
+            return d;
+        }
+
+        static BuildingDef Work(string model, string name, Category category, int cost, int w, int h, int floors, int jobs, bool industrial, int minPop = 0, int desire = 0, int desireRadius = 0)
+        {
+            var d = Add(model, name, category, Kind.Jobs, cost, 0, w, h, floors, minPop);
+            d.Jobs = jobs;
+            d.Industrial = industrial;
+            d.PowerUse = System.Math.Max(1, jobs / (industrial ? 5 : 8));
+            d.Desirability = desire;
+            d.DesireRadius = desireRadius;
+            d.Summary = $"{jobs} empleos";
+            return d;
+        }
+
+        static BuildingDef Plant(string model, string name, int cost, int upkeep, int w, int h, int floors, int supply, int reach, int minPop = 0, int desire = 0, int desireRadius = 0)
+        {
+            var d = Add(model, name, Category.Energy, Kind.Power, cost, upkeep, w, h, floors, minPop);
+            d.PowerSupply = supply;
+            d.PowerReach = reach;
+            d.Desirability = desire;
+            d.DesireRadius = desireRadius;
+            d.Summary = supply > 0 ? $"{supply} MW" : $"Lleva la luz {reach} casillas";
+            return d;
+        }
+
+        static BuildingDef Serve(string model, string name, Category category, Service service, int cost, int upkeep, int w, int h, int floors, int radius, int minPop = 0, int desire = 0)
+        {
+            var d = Add(model, name, category, Kind.Service, cost, upkeep, w, h, floors, minPop);
+            d.Service = service;
+            d.Radius = radius;
+            d.Desirability = desire;
+            d.DesireRadius = desire != 0 ? System.Math.Max(3, radius / 2) : 0;
+            d.PowerUse = System.Math.Max(1, w * h / 2);
+            d.Summary = service == Service.None ? (d.CityBonus > 0 ? "" : $"Atractivo +{desire}") : $"Alcance {radius} casillas";
+            return d;
+        }
+
+        static Catalog()
+        {
+            // Transport and mobility.
+            var road = Add("calle", "Calle local", Category.Transport, Kind.Road, 10, 1, 1, 1, 0);
+            road.Summary = "$ 10 por casilla";
+            Road = road.Id;
+            var avenue = Add("avenida", "Avenida", Category.Transport, Kind.Road, 25, 2, 1, 1, 0, 300);
+            avenue.Summary = "$ 25 por casilla";
+            avenue.Desirability = 3;
+            avenue.DesireRadius = 2;
+            Avenue = avenue.Id;
+            var bridge = Add("puente", "Puente urbano", Category.Transport, Kind.Road, 120, 4, 1, 1, 0, 100);
+            bridge.Bridge = true;
+            bridge.Summary = "Cruza el río";
+            Bridge = bridge.Id;
+            Serve("terminal_autobuses", "Terminal de autobuses", Category.Transport, Service.Transit, 6000, 250, 3, 2, 1, 16, 800, 4);
+            Serve("estacion_tren", "Estación de tren", Category.Transport, Service.Transit, 18000, 600, 5, 2, 2, 26, 3000, 5);
+            Serve("estacion_metro", "Estación de metro", Category.Transport, Service.Transit, 12000, 450, 1, 1, 1, 14, 6000, 6);
+            Work("centro_logistico", "Centro logístico", Category.Transport, 14000, 4, 3, 2, 90, true, 1500, -10, 4);
+            var airport = Work("aeropuerto", "Aeropuerto", Category.Transport, 90000, 8, 5, 3, 400, false, 15000, -25, 10);
+            airport.CityBonus = 4;
+            airport.Summary = "400 empleos · satisfacción +4";
+
+            // Housing.
+            Home("casa_basica", "Casa básica", 300, 1, 1, 1, 4);
+            Home("casa_ampliada", "Casa ampliada", 550, 1, 1, 2, 6);
+            Home("duplex", "Dúplex", 800, 1, 1, 2, 10, 40);
+            Home("apartamentos", "Apartamentos", 3500, 2, 2, 4, 48, 150);
+            Home("conjunto_residencial", "Conjunto residencial", 9500, 4, 4, 4, 150, 500);
+            Home("torre_residencial", "Torre residencial", 16000, 3, 3, 15, 320, 1200);
+
+            // Commerce and offices.
+            Work("tienda_abarrotes", "Tienda de abarrotes", Category.Commerce, 450, 1, 1, 1, 6, false);
+            Work("mercado_municipal", "Mercado municipal", Category.Commerce, 2500, 2, 2, 2, 25, false, 100);
+            Work("supermercado", "Supermercado", Category.Commerce, 4500, 3, 2, 1, 40, false, 250);
+            Work("restaurante", "Restaurante", Category.Commerce, 1200, 1, 1, 2, 12, false, 60, 6, 3);
+            Work("centro_comercial", "Centro comercial", Category.Commerce, 14000, 4, 3, 3, 130, false, 900, 5, 5);
+            Work("edificio_oficinas", "Edificio de oficinas", Category.Commerce, 9000, 2, 2, 5, 120, false, 700);
+            Work("torre_corporativa", "Torre corporativa", Category.Commerce, 26000, 3, 3, 18, 360, false, 2500);
+            Work("centro_financiero", "Centro financiero", Category.Commerce, 45000, 4, 4, 14, 600, false, 6000, 6, 6);
+
+            // Industry and production.
+            Work("granja_agricola", "Granja agrícola", Category.Industry, 1500, 4, 4, 1, 12, true);
+            Work("procesadora_alimentos", "Planta de alimentos", Category.Industry, 5000, 3, 3, 2, 40, true, 100, -15, 4);
+            Work("aserradero", "Aserradero", Category.Industry, 3500, 3, 3, 2, 30, true, 50, -15, 4);
+            Work("fabrica_materiales", "Fábrica de materiales", Category.Industry, 7000, 4, 3, 2, 50, true, 300, -25, 5);
+            Work("planta_metalurgica", "Planta metalúrgica", Category.Industry, 12000, 4, 4, 3, 90, true, 800, -40, 7);
+            Work("fabrica_bienes", "Fábrica de bienes de consumo", Category.Industry, 10000, 4, 3, 2, 80, true, 600, -20, 5);
+            Work("planta_electronica", "Planta electrónica", Category.Industry, 18000, 4, 3, 2, 110, true, 2000, -10, 4);
+            Work("industria_automatizada", "Industria automatizada", Category.Industry, 30000, 4, 4, 2, 160, true, 5000, -10, 4);
+
+            // Energy.
+            Plant("central_termoelectrica", "Central termoeléctrica", 6000, 200, 3, 3, 3, 400, 12, 0, -35, 7);
+            Plant("subestacion", "Subestación eléctrica", 800, 20, 1, 1, 1, 0, 10);
+            Plant("planta_solar", "Planta solar", 5000, 40, 3, 3, 1, 120, 8, 200);
+            Plant("parque_eolico", "Parque eólico", 8000, 60, 4, 4, 1, 220, 10, 500);
+            var hydro = Plant("central_hidroelectrica", "Central hidroeléctrica", 20000, 300, 3, 3, 3, 900, 14, 2000);
+            hydro.NeedsWater = true;
+            hydro.Summary = "900 MW · junto al río";
+            Plant("sistema_baterias", "Sistema de baterías", 4000, 50, 2, 2, 1, 100, 6, 1000);
+            Plant("central_nuclear", "Central nuclear", 60000, 1500, 5, 4, 4, 3000, 20, 8000, -30, 8);
+            Plant("red_inteligente", "Centro de red inteligente", 15000, 300, 2, 2, 3, 300, 16, 4000);
+
+            // Water, sanitation and waste.
+            Serve("estacion_bombeo", "Estación de bombeo", Category.Water, Service.Water, 1200, 50, 1, 1, 1, 9);
+            Serve("planta_potabilizadora", "Planta potabilizadora", Category.Water, Service.Water, 8000, 280, 3, 3, 2, 22, 1000);
+            Serve("tanque_agua", "Tanque de almacenamiento", Category.Water, Service.Water, 3000, 90, 2, 2, 3, 13, 400);
+            Serve("control_alcantarillado", "Red de alcantarillado", Category.Water, Service.Sewage, 3000, 110, 2, 2, 2, 15, 300);
+            Serve("planta_tratamiento", "Planta de tratamiento", Category.Water, Service.Sewage, 9000, 320, 4, 3, 2, 26, 1500, -10);
+            Serve("recoleccion_basura", "Centro de recolección de basura", Category.Water, Service.Waste, 2500, 100, 3, 2, 1, 15, 300, -8);
+            Serve("planta_reciclaje", "Planta de reciclaje", Category.Water, Service.Waste, 7000, 240, 3, 3, 2, 22, 1500, -5);
+            var waste = Serve("valorizacion_energetica", "Planta de valorización energética", Category.Water, Service.Waste, 15000, 420, 3, 3, 3, 24, 3000, -15);
+            waste.PowerSupply = 150;
+            waste.PowerReach = 8;
+            waste.Summary = "Alcance 24 · 150 MW";
+
+            // Safety and government.
+            Serve("puesto_policia", "Puesto de policía", Category.Safety, Service.Safety, 700, 60, 1, 1, 1, 9, 0, 5);
+            Serve("comisaria", "Comisaría", Category.Safety, Service.Safety, 3500, 180, 2, 2, 2, 18, 800, 8);
+            Serve("estacion_bomberos", "Estación de bomberos", Category.Safety, Service.Fire, 2500, 140, 2, 2, 2, 13, 200, 5);
+            Serve("proteccion_civil", "Centro de protección civil", Category.Safety, Service.Fire, 4500, 200, 2, 2, 2, 18, 1500, 4);
+            Serve("central_emergencias", "Central de emergencias", Category.Safety, Service.Safety, 7000, 300, 2, 2, 2, 24, 3000, 4);
+            Serve("gestion_riesgos", "Centro de gestión de riesgos", Category.Safety, Service.Fire, 9000, 360, 2, 2, 3, 28, 5000, 4);
+            var hall = Serve("ayuntamiento", "Ayuntamiento", Category.Safety, Service.None, 10000, 300, 3, 3, 4, 0, 500, 12);
+            hall.CityBonus = 5;
+            hall.DesireRadius = 6;
+            hall.Summary = "Satisfacción +5 en toda la ciudad";
+            var admin = Serve("centro_administrativo", "Centro administrativo", Category.Safety, Service.None, 20000, 500, 3, 3, 5, 0, 4000, 6);
+            admin.CityBonus = 4;
+            admin.DesireRadius = 5;
+            admin.Summary = "Satisfacción +4 en toda la ciudad";
+
+            // Education and research.
+            Serve("guarderia", "Guardería", Category.Education, Service.Education, 1000, 60, 2, 1, 1, 8, 0, 6);
+            Serve("escuela_primaria", "Escuela primaria", Category.Education, Service.Education, 3000, 140, 3, 2, 2, 13, 200, 10);
+            Serve("escuela_secundaria", "Escuela secundaria", Category.Education, Service.Education, 6000, 240, 3, 3, 3, 17, 800, 8);
+            Serve("instituto_tecnico", "Instituto técnico", Category.Education, Service.Education, 9000, 320, 3, 3, 4, 19, 2000, 8);
+            Serve("universidad", "Universidad", Category.Education, Service.Education, 30000, 900, 5, 4, 5, 30, 6000, 14);
+            Serve("biblioteca", "Biblioteca pública", Category.Education, Service.Culture, 3000, 120, 2, 2, 2, 13, 400, 10);
+            Serve("centro_investigacion", "Centro de investigación", Category.Education, Service.Education, 40000, 1100, 5, 3, 5, 24, 10000, 10);
+
+            // Health: footprints follow the real models.
+            Serve("consultorio", "Consultorio", Category.Health, Service.Health, 1200, 60, 2, 2, 1, 8, 0, 8);
+            Serve("clinica", "Clínica comunitaria", Category.Health, Service.Health, 3500, 150, 3, 2, 2, 12, 600, 10);
+            Serve("urgencias", "Centro de urgencias", Category.Health, Service.Health, 6000, 260, 3, 3, 2, 15, 1200, 8);
+            Serve("hospital_general", "Hospital general", Category.Health, Service.Health, 12000, 480, 4, 4, 6, 20, 2500, 12);
+            Serve("hospital_especializado", "Hospital especializado", Category.Health, Service.Health, 20000, 800, 5, 4, 8, 26, 6000, 15);
+            Serve("laboratorio", "Laboratorio médico", Category.Health, Service.Health, 2500, 110, 3, 2, 2, 10, 300, 6);
+
+            // Parks, culture and the future.
+            Serve("parque_vecinal", "Parque vecinal", Category.Parks, Service.None, 150, 5, 1, 1, 0, 0, 0, 25).DesireRadius = 4;
+            var plaza = Serve("plaza_publica", "Plaza pública", Category.Parks, Service.None, 900, 20, 2, 2, 0, 0, 100, 30);
+            plaza.DesireRadius = 6;
+            Serve("centro_deportivo", "Centro deportivo", Category.Parks, Service.Culture, 5000, 200, 3, 2, 2, 14, 500, 10);
+            Serve("museo", "Museo", Category.Parks, Service.Culture, 8000, 260, 3, 2, 2, 16, 1500, 12);
+            Serve("teatro", "Teatro", Category.Parks, Service.Culture, 9000, 280, 3, 2, 3, 16, 2500, 12);
+            Serve("estadio", "Estadio", Category.Parks, Service.Culture, 40000, 1200, 6, 5, 4, 30, 8000, 6);
+            Work("granja_vertical", "Granja vertical", Category.Parks, 12000, 2, 2, 6, 60, true, 5000);
+            Home("residencial_inteligente", "Edificio residencial inteligente", 40000, 3, 3, 18, 520, 8000, Category.Parks);
+            Work("fabrica_robotizada", "Fábrica robotizada", Category.Parks, 35000, 4, 3, 2, 140, true, 8000, -8, 4);
+            var smart = Serve("gestion_urbana", "Centro de gestión urbana inteligente", Category.Parks, Service.None, 30000, 700, 3, 2, 4, 0, 10000, 8);
+            smart.CityBonus = 6;
+            smart.DesireRadius = 5;
+            smart.Summary = "Satisfacción +6 en toda la ciudad";
+        }
+
+        // ---------------------------------------------------------------- services
+
+        /// <summary>Spanish name of a service, for the interface.</summary>
+        public static string ServiceName(Service s)
+        {
+            switch (s)
+            {
+                case Service.Health: return "Salud";
+                case Service.Education: return "Educación";
+                case Service.Safety: return "Seguridad";
+                case Service.Fire: return "Bomberos";
+                case Service.Water: return "Agua potable";
+                case Service.Sewage: return "Drenaje";
+                case Service.Waste: return "Recolección de basura";
+                case Service.Culture: return "Cultura y deporte";
+                case Service.Transit: return "Transporte público";
+                default: return "";
             }
         }
 
-        static readonly int[] Single = { 1 };
-        static readonly int[] ResidentialLevel2 = { 2, 4 };
-        static readonly int[] ResidentialLevel3 = { 3 };
-
-        /// <summary>
-        /// Sides, in lots, of the square buildings a zone can grow into at a level. Homes start as houses on one lot;
-        /// apartments need 2 x 2 lots (or a 4 x 4 complex) and towers 3 x 3.
-        /// </summary>
-        public static int[] Footprints(Structure zone, int level)
+        /// <summary>Population from which residents start to miss a service they do not have.</summary>
+        public static int ServiceThreshold(Service s)
         {
-            if (zone != Structure.Residential || level <= 1) return Single;
-            return level == 2 ? ResidentialLevel2 : ResidentialLevel3;
+            switch (s)
+            {
+                case Service.Water: return 150;
+                case Service.Health: return 300;
+                case Service.Safety: return 300;
+                case Service.Education: return 400;
+                case Service.Fire: return 500;
+                case Service.Waste: return 600;
+                case Service.Sewage: return 900;
+                case Service.Culture: return 1500;
+                case Service.Transit: return 3000;
+                default: return int.MaxValue;
+            }
         }
 
-        /// <summary>Power one tile of a zone, or a whole service building, draws from the grid.</summary>
-        public static int PowerUse(Structure type, int level)
+        public static readonly Service[] Services =
         {
-            var def = Get(type);
-            if (def == null || type == Structure.Road || type == Structure.PowerPlant) return 0;
-            if (def.IsZone) return level * (type == Structure.Industrial ? 3 : 2);
-            return def.PowerUse;
-        }
+            Service.Water, Service.Health, Service.Safety, Service.Education, Service.Fire,
+            Service.Waste, Service.Sewage, Service.Culture, Service.Transit,
+        };
     }
 }

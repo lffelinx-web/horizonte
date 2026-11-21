@@ -6,7 +6,7 @@ namespace Horizonte.Simulation
     public static class Progress
     {
         /// <summary>Population needed to reach each level; level 1 starts at zero.</summary>
-        static readonly int[] LevelPopulation = { 0, 50, 200, 500, 1000, 2000, 4000, 8000, 15000, 30000 };
+        static readonly int[] LevelPopulation = { 0, 30, 100, 300, 700, 1500, 3000, 6000, 12000, 25000 };
 
         public static int MaxLevel => LevelPopulation.Length;
 
@@ -44,19 +44,25 @@ namespace Horizonte.Simulation
 
         static Goal G(string text, int target, Func<City, long> value) => new Goal { Text = text, Target = target, Value = value };
 
+        static int Homes(City c) => c.Count(d => d.Kind == Kind.Housing);
+        static int Plants(City c) => c.Count(d => d.Kind == Kind.Power && d.PowerSupply > 0);
+
         /// <summary>Goals in the order they are shown; each is judged from the city as it is now.</summary>
         public static readonly Goal[] Goals =
         {
-            G("Marca 10 lotes residenciales", 10, c => c.Count(Structure.Residential)),
-            G("Construye una central eléctrica", 1, c => c.Count(Structure.PowerPlant)),
-            G("Alcanza 100 habitantes", 100, c => c.Population),
-            G("Marca 6 lotes comerciales", 6, c => c.Count(Structure.Commercial)),
-            G("Crea 100 empleos", 100, c => c.Jobs),
-            G("Construye un parque", 1, c => c.Count(Structure.Park)),
-            G("Alcanza 500 habitantes", 500, c => c.Population),
-            G("Construye una escuela", 1, c => c.Count(Structure.School)),
-            G("Construye un consultorio", 1, c => c.Count(Structure.Doctor)),
-            G("Construye una estación de policía", 1, c => c.Count(Structure.Police)),
+            G("Construye 5 viviendas junto a una calle", 5, c => Homes(c)),
+            G("Construye una central eléctrica", 1, c => Plants(c)),
+            G("Abre una tienda de abarrotes", 1, c => c.Count("tienda_abarrotes")),
+            G("Alcanza 50 habitantes", 50, c => c.Population),
+            G("Construye una granja agrícola", 1, c => c.Count("granja_agricola")),
+            G("Construye una estación de bombeo", 1, c => c.Count("estacion_bombeo")),
+            G("Crea 60 empleos", 60, c => c.Jobs),
+            G("Construye un consultorio", 1, c => c.Count("consultorio")),
+            G("Construye un puesto de policía", 1, c => c.Count("puesto_policia")),
+            G("Alcanza 200 habitantes", 200, c => c.Population),
+            G("Construye una escuela primaria", 1, c => c.Count("escuela_primaria")),
+            G("Construye una estación de bomberos", 1, c => c.Count("estacion_bomberos")),
+            G("Construye el ayuntamiento", 1, c => c.Count("ayuntamiento")),
             G("Alcanza 1 000 habitantes", 1000, c => c.Population),
             G("Ahorra $ 50 000", 50000, c => c.Money),
             G("Alcanza 2 500 habitantes", 2500, c => c.Population),

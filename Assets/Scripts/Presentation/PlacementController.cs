@@ -221,7 +221,7 @@ namespace Horizonte.Presentation
         /// <summary>Buildings bigger than one tile are centred under the finger.</summary>
         Vector2Int SingleAnchor()
         {
-            var def = Catalog.Get(Tools.ToStructure(Tool));
+            var def = Tool.Def;
             return new Vector2Int(currentTile.x - (def.Width - 1) / 2, currentTile.y - (def.Height - 1) / 2);
         }
 
@@ -232,19 +232,19 @@ namespace Horizonte.Presentation
             preview.Clear();
             long budget = city.Money, total = 0;
             int count = 0;
-            var type = Tools.ToStructure(Tool);
+            ushort type = Tool.Building;
             const float lift = .25f, inset = .25f;
             foreach (var (x, y) in shape)
             {
                 if (!city.InBounds(x, y)) continue;
                 float x0 = x * CityView.TileSize + inset, z0 = y * CityView.TileSize + inset;
-                if (Tool == Tool.Bulldoze)
+                if (Tool.IsBulldoze)
                 {
                     int i = city.Index(x, y);
-                    bool something = city.Structure[i] != Structure.None || city.Terrain[i] == Simulation.Terrain.Forest;
+                    bool something = city.Building[i] != Catalog.None || city.Terrain[i] == Simulation.Terrain.Forest;
                     if (!something) continue;
                     preview.Flat(2, x0, z0, x0 + CityView.TileSize - 2 * inset, z0 + CityView.TileSize - 2 * inset, lift);
-                    total += city.Structure[i] != Structure.None ? Catalog.BulldozeCost : Catalog.ClearForestCost;
+                    total += city.Building[i] != Catalog.None ? Catalog.BulldozeCost : Catalog.ClearForestCost;
                     count++;
                     continue;
                 }
@@ -271,15 +271,14 @@ namespace Horizonte.Presentation
         {
             var city = game.City;
             BuildShape();
-            if (Tool == Tool.Bulldoze)
+            if (Tool.IsBulldoze)
             {
                 int removed = 0;
                 foreach (var (x, y) in shape) if (city.Bulldoze(x, y)) removed++;
                 if (removed == 0) hud.Toast("No hay nada que demoler ahí");
                 return;
             }
-            var type = Tools.ToStructure(Tool);
-            int placed = city.PlaceMany(type, shape, out var problem);
+            int placed = city.PlaceMany(Tool.Building, shape, out var problem);
             if (problem != PlaceResult.Ok && (placed == 0 || problem == PlaceResult.NoMoney)) hud.Toast(Message(problem));
         }
 
@@ -288,9 +287,11 @@ namespace Horizonte.Presentation
             switch (r)
             {
                 case PlaceResult.NoMoney: return "No alcanza el dinero";
-                case PlaceResult.Water: return "No se puede construir sobre el agua";
+                case PlaceResult.Water: return Tool.Def != null && Tool.Def.IsRoad ? "Para cruzar el río usa el puente" : "No se puede construir sobre el agua";
                 case PlaceResult.OutOfBounds: return "Fuera del terreno de la ciudad";
-                case PlaceResult.Locked: return $"Se desbloquea con {Hud.N(Catalog.Get(Tools.ToStructure(Tool)).MinPopulation)} habitantes";
+                case PlaceResult.Locked: return $"Se desbloquea con {Hud.N(Tool.Def.MinPopulation)} habitantes";
+                case PlaceResult.NoRoad: return "Debe quedar junto a una calle";
+                case PlaceResult.NeedsWater: return "Debe quedar junto al río";
                 default: return "Ese lugar ya está ocupado";
             }
         }

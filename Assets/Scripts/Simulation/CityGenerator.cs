@@ -32,7 +32,7 @@ namespace Horizonte.Simulation
             {
                 int i = city.Index(x, hy);
                 city.Terrain[i] = Terrain.Grass;
-                city.Structure[i] = Structure.Road;
+                city.Building[i] = Catalog.Road;
                 city.Anchor[i] = i;
             }
             // Keep the starting area clear so the first blocks are easy to lay out.

@@ -2,7 +2,7 @@
 
 Simulador de construcción de ciudades en 3D para iPhone, hecho en Unity 6 (6000.6.7f1) con URP.
 
-Construyes calles y marcas zonas residenciales, comerciales e industriales. La ciudad crece sola si las zonas tienen calle conectada a la carretera y electricidad. Las viviendas empiezan como casas en un lote y, al crecer, juntan lotes vecinos: apartamentos en 2 × 2, conjunto residencial en 4 × 4 y torre en 3 × 3. Los parques, la policía, la escuela y los edificios de salud suben el atractivo y la satisfacción, y la industria los baja. Cada mes se cobran impuestos y se paga el mantenimiento.
+Trazas calles y colocas cada edificio junto a ellas: viviendas, comercios, industrias, energía, agua, seguridad, educación, salud, transporte y parques, cada uno con su precio. Las viviendas se llenan de habitantes si tienen calle conectada a la carretera, electricidad y empleos cerca; los servicios cubren un radio y suben la satisfacción. La electricidad llega a un radio alrededor de las centrales, y las subestaciones la llevan más lejos. Cada mes se cobran impuestos y se paga el mantenimiento.
 
 ## Estructura
 
@@ -15,28 +15,22 @@ Construyes calles y marcas zonas residenciales, comerciales e industriales. La c
 
 ## Modelos de Blender
 
-Una casilla mide **10 × 10 m**. Pon los FBX en `Assets/Modelos` con estos nombres. Mientras falte un modelo, el juego usa uno provisional.
+Una casilla mide **10 × 10 m**. Cada edificio del juego tiene un nombre de archivo fijo; pon el FBX en `Assets/Modelos` con ese nombre y reemplaza al edificio provisional. La lista completa, con tamaño en casillas, precio y efectos, está en `Assets/Scripts/Simulation/Catalog.cs` (el primer texto de cada línea es el nombre del archivo).
 
-| Edificio | Archivo | Planta en casillas |
-| --- | --- | --- |
-| Casa (nivel 1) | `residencial_1_a.fbx`, `_b`, `_c`… (casa básica, casa ampliada, dúplex) | 1 × 1 |
-| Apartamentos (nivel 2) | `residencial_2_2.fbx` | 2 × 2 |
-| Conjunto residencial (nivel 2) | `residencial_2_4.fbx` | 4 × 4 |
-| Torre residencial (nivel 3) | `residencial_3_3.fbx` | 3 × 3 |
-| Comercial (tienda, oficinas, torre) | `comercial_1.fbx`, `comercial_2.fbx`, `comercial_3.fbx` | 1 × 1 |
-| Industrial (taller, fábrica, planta) | `industrial_1.fbx`, `industrial_2.fbx`, `industrial_3.fbx` | 1 × 1 |
-| Central eléctrica | `central_electrica.fbx` | 2 × 2 |
-| Parque | `parque.fbx` | 1 × 1 |
-| Policía | `policia.fbx` | 1 × 1 |
-| Escuela | `escuela.fbx` | 2 × 1 (ancho × fondo) |
-| Consultorio | `consultorio.fbx` | 2 × 2 |
-| Laboratorio médico | `laboratorio.fbx` | 3 × 2 |
-| Clínica comunitaria | `clinica.fbx` | 3 × 2 |
-| Centro de urgencias | `urgencias.fbx` | 3 × 3 |
-| Hospital general | `hospital_general.fbx` | 4 × 4 |
-| Hospital especializado | `hospital_especializado.fbx` | 5 × 4 |
+| Categoría | Archivos (sin `.fbx`) |
+| --- | --- |
+| Transporte | `terminal_autobuses`, `estacion_tren`, `estacion_metro`, `centro_logistico`, `aeropuerto` (calle, avenida y puente se dibujan solos) |
+| Vivienda | `casa_basica`, `casa_ampliada`, `duplex`, `apartamentos`, `conjunto_residencial`, `torre_residencial` |
+| Comercio | `tienda_abarrotes`, `mercado_municipal`, `supermercado`, `restaurante`, `centro_comercial`, `edificio_oficinas`, `torre_corporativa`, `centro_financiero` |
+| Industria | `granja_agricola`, `procesadora_alimentos`, `aserradero`, `fabrica_materiales`, `planta_metalurgica`, `fabrica_bienes`, `planta_electronica`, `industria_automatizada` |
+| Energía | `central_termoelectrica`, `subestacion`, `planta_solar`, `parque_eolico`, `central_hidroelectrica`, `sistema_baterias`, `central_nuclear`, `red_inteligente` |
+| Agua y residuos | `estacion_bombeo`, `planta_potabilizadora`, `tanque_agua`, `control_alcantarillado`, `planta_tratamiento`, `recoleccion_basura`, `planta_reciclaje`, `valorizacion_energetica` |
+| Seguridad y gobierno | `puesto_policia`, `comisaria`, `estacion_bomberos`, `proteccion_civil`, `central_emergencias`, `gestion_riesgos`, `ayuntamiento`, `centro_administrativo` |
+| Educación | `guarderia`, `escuela_primaria`, `escuela_secundaria`, `instituto_tecnico`, `universidad`, `biblioteca`, `centro_investigacion` |
+| Salud | `consultorio`, `clinica`, `urgencias`, `hospital_general`, `hospital_especializado`, `laboratorio` |
+| Parques, cultura y futuro | `parque_vecinal`, `plaza_publica`, `centro_deportivo`, `museo`, `teatro`, `estadio`, `granja_vertical`, `residencial_inteligente`, `fabrica_robotizada`, `gestion_urbana` |
 
-El nombre de las zonas es `zona_nivel` y, si el edificio ocupa más de un lote, `zona_nivel_lado` (por ejemplo `residencial_3_3` es una torre de 3 × 3). Para tener variantes, añade una letra al final, por ejemplo `residencial_1_b.fbx`. El juego elige una al azar para cada lote.
+Si el modelo trae otro tamaño, cambia su ancho y fondo en `Catalog.cs` para que coincidan. Para tener variantes, añade una letra al final, por ejemplo `casa_basica_b.fbx`; el juego elige una al azar.
 
 Reglas para exportar:
 

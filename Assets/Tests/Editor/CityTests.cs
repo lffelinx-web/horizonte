@@ -6,120 +6,152 @@ namespace Horizonte.Tests
 {
     public sealed class CityTests
     {
-        /// <summary>A flat 24 x 24 map with a road from the west edge along y = 10.</summary>
+        static ushort Id(string model) => Catalog.Get(model).Id;
+
+        /// <summary>Flat land with a street along y = 10 that reaches the west edge of the map.</summary>
         static City Flat()
         {
-            var city = new City(24, 24, 7);
-            city.Money = 1_000_000;
-            foreach (var (x, y) in City.Line(0, 10, 15, 10)) city.Place(Structure.Road, x, y);
+            var city = new City(30, 30, 7) { Money = 1_000_000, IgnoreRequirements = true };
+            city.PlaceMany(Catalog.Road, City.Line(0, 10, 20, 10), out _);
             return city;
         }
 
-        [Test]
-        public void PlacingChargesMoneyAndBlocksTheTile()
+        static void Days(City city, int days)
         {
-            var city = new City(10, 10);
-            long before = city.Money;
-            Assert.AreEqual(PlaceResult.Ok, city.Place(Structure.Road, 2, 2));
-            Assert.AreEqual(before - Catalog.Get(Structure.Road).Cost, city.Money);
-            Assert.AreEqual(PlaceResult.Occupied, city.Place(Structure.Park, 2, 2));
-            Assert.AreEqual(PlaceResult.OutOfBounds, city.Place(Structure.PowerPlant, 9, 9));
+            for (int d = 0; d < days; d++) city.Step();
         }
 
         [Test]
-        public void NoMoneyStopsADrag()
+        public void EveryBuildingHasAModelNameAndAPrice()
         {
-            var city = new City(30, 3) { Money = 35 };
-            int placed = city.PlaceMany(Structure.Road, City.Line(0, 1, 29, 1), out var problem);
-            Assert.AreEqual(3, placed);
-            Assert.AreEqual(PlaceResult.NoMoney, problem);
+            var defs = Catalog.All.Where(d => d != null).ToList();
+            Assert.Greater(defs.Count, 70);
+            Assert.AreEqual(defs.Count, defs.Select(d => d.Model).Distinct().Count());
+            Assert.IsTrue(defs.All(d => d.Cost > 0 && d.Width > 0 && d.Height > 0 && !string.IsNullOrEmpty(d.Name)));
+        }
+
+        [Test]
+        public void BuildingsNeedAStreetNextToThem()
+        {
+            var city = Flat();
+            Assert.AreEqual(PlaceResult.NoRoad, city.Place(Id("casa_basica"), 5, 14));
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Id("casa_basica"), 5, 11));
+            Assert.AreEqual(PlaceResult.Occupied, city.Place(Id("casa_basica"), 5, 11));
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Id("apartamentos"), 6, 8));
+        }
+
+        [Test]
+        public void PlacingChargesMoney()
+        {
+            var city = Flat();
+            long before = city.Money;
+            city.Place(Id("duplex"), 2, 11);
+            Assert.AreEqual(before - Catalog.Get("duplex").Cost, city.Money);
+        }
+
+        [Test]
+        public void LockedBuildingsWaitForPopulation()
+        {
+            var city = Flat();
+            city.IgnoreRequirements = false;
+            Assert.AreEqual(PlaceResult.Locked, city.Place(Id("torre_residencial"), 2, 11));
+            city.IgnoreRequirements = true;
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Id("torre_residencial"), 2, 11));
+        }
+
+        [Test]
+        public void HomesFillUpWithPowerAndJobs()
+        {
+            var city = Flat();
+            city.Place(Id("central_termoelectrica"), 0, 11);
+            for (int x = 4; x < 12; x++) city.Place(Id("casa_basica"), x, 11);
+            city.Place(Id("tienda_abarrotes"), 4, 9);
+            city.Place(Id("granja_agricola"), 6, 6);
+            Assert.IsTrue(city.Working(city.Index(4, 11)));
+            Days(city, 120);
+            Assert.Greater(city.Population, 10);
+            Assert.Greater(city.Satisfaction, 0);
+        }
+
+        [Test]
+        public void HomesWithoutPowerStayEmpty()
+        {
+            var city = Flat();
+            for (int x = 4; x < 8; x++) city.Place(Id("casa_basica"), x, 11);
+            Days(city, 60);
+            Assert.AreEqual(0, city.Population);
+            Assert.IsFalse(city.Powered[city.Index(4, 11)]);
+        }
+
+        [Test]
+        public void PowerReachesOnlyAroundPlantsAndSubstations()
+        {
+            var city = new City(60, 30, 7) { Money = 1_000_000 };
+            city.PlaceMany(Catalog.Road, City.Line(0, 10, 59, 10), out _);
+            city.Place(Id("central_termoelectrica"), 0, 11);
+            city.Place(Id("casa_basica"), 50, 11);
+            Assert.IsFalse(city.Powered[city.Index(50, 11)]);
+            for (int x = 12; x < 50; x += 9) city.Place(Id("subestacion"), x, 11);
+            Assert.IsTrue(city.Powered[city.Index(50, 11)]);
+        }
+
+        [Test]
+        public void ServicesCoverNearbyHomes()
+        {
+            var city = Flat();
+            city.Place(Id("central_termoelectrica"), 0, 11);
+            city.Place(Id("casa_basica"), 4, 11);
+            Assert.IsFalse(city.Covered(city.Index(4, 11), Service.Health));
+            city.Place(Id("consultorio"), 6, 8);
+            Assert.IsTrue(city.Covered(city.Index(4, 11), Service.Health));
         }
 
         [Test]
         public void MultiTileBuildingsAreBulldozedWhole()
         {
-            var city = new City(10, 10);
-            city.Place(Structure.PowerPlant, 3, 3);
-            Assert.IsTrue(city.Bulldoze(4, 4));
-            Assert.IsTrue(Enumerable.Range(0, 100).All(i => city.Structure[i] == Structure.None));
+            var city = Flat();
+            city.Place(Id("apartamentos"), 3, 11);
+            Assert.IsTrue(city.Bulldoze(4, 12));
+            Assert.AreEqual(Catalog.None, city.Building[city.Index(3, 11)]);
+            Assert.AreEqual(-1, city.Anchor[city.Index(4, 12)]);
         }
 
         [Test]
-        public void PowerTravelsAlongRoadsAndRunsOut()
+        public void BridgesGoOnlyOverWaterAndHydroNeedsTheRiver()
         {
             var city = Flat();
-            city.Place(Structure.PowerPlant, 16, 10);
-            city.Place(Structure.Residential, 3, 11);
-            Assert.IsTrue(city.Powered[city.Index(3, 11)]);
-            Assert.IsFalse(city.Powered[city.Index(3, 15)]);
-            Assert.AreEqual(Catalog.Get(Structure.PowerPlant).PowerSupply, city.PowerSupply);
+            city.IgnoreRequirements = true;
+            city.Terrain[city.Index(21, 10)] = Terrain.Water;
+            Assert.AreEqual(PlaceResult.Water, city.Place(Catalog.Road, 21, 10));
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Catalog.Bridge, 21, 10));
+            Assert.AreEqual(PlaceResult.Occupied, city.Place(Catalog.Bridge, 22, 10));
+            Assert.AreEqual(PlaceResult.NeedsWater, city.Place(Id("central_hidroelectrica"), 2, 11));
         }
 
         [Test]
-        public void RoadAccessNeedsAConnectionToTheEdge()
+        public void StreetsCanBeRebuiltAsAvenues()
         {
             var city = Flat();
-            city.Place(Structure.Residential, 5, 11);
-            city.Place(Structure.Road, 5, 20);
-            city.Place(Structure.Residential, 5, 21);
-            Assert.IsTrue(city.RoadAccess[city.Index(5, 11)]);
-            Assert.IsTrue(city.RoadAccess[city.Index(5, 12)], "Lots two tiles away are served too.");
-            Assert.IsFalse(city.RoadAccess[city.Index(5, 13)]);
-            Assert.IsFalse(city.RoadAccess[city.Index(5, 21)], "An island road does not count.");
-        }
-
-        [Test]
-        public void ServedZonesGrowIntoACity()
-        {
-            var city = Flat();
-            city.Place(Structure.PowerPlant, 16, 10);
-            city.PlaceMany(Structure.Residential, City.Rect(1, 11, 14, 12), out _);
-            city.PlaceMany(Structure.Industrial, City.Rect(1, 8, 7, 9), out _);
-            city.PlaceMany(Structure.Commercial, City.Rect(8, 8, 14, 9), out _);
-            for (int d = 0; d < 360; d++) city.Step();
-            Assert.Greater(city.Population, 150);
-            Assert.Greater(city.Jobs, 50);
-            Assert.AreEqual(2, city.Year);
-        }
-
-        [Test]
-        public void UnservedZonesStayEmpty()
-        {
-            var city = new City(20, 20);
-            city.PlaceMany(Structure.Residential, City.Rect(2, 2, 6, 6), out _);
-            for (int d = 0; d < 200; d++) city.Step();
-            Assert.AreEqual(0, city.Population);
-        }
-
-        [Test]
-        public void BudgetTaxesThePopulationEveryMonth()
-        {
-            var city = Flat();
-            city.Place(Structure.PowerPlant, 16, 10);
-            city.PlaceMany(Structure.Residential, City.Rect(1, 11, 14, 12), out _);
-            for (int d = 0; d < 120; d++) city.Step();
-            int months = 0;
-            city.MonthPassed += () => months++;
-            long before = city.Money;
-            for (int d = 0; d < City.DaysPerMonth; d++) city.Step();
-            Assert.AreEqual(1, months);
-            Assert.AreEqual(before + city.LastIncome - city.LastExpenses, city.Money);
-            Assert.Greater(city.LastIncome, 0);
+            city.IgnoreRequirements = true;
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Catalog.Avenue, 3, 10));
+            Assert.AreEqual(Catalog.Avenue, city.Building[city.Index(3, 10)]);
+            Assert.IsTrue(city.RoadConnected[city.Index(5, 10)]);
         }
 
         [Test]
         public void SaveRoundTripKeepsTheCity()
         {
-            var city = CityGenerator.Create(32, 32, 99);
+            var city = Flat();
             city.Name = "Nueva Ardelia";
-            city.Place(Structure.PowerPlant, 3, 3);
-            city.Place(Structure.School, 8, 3);
-            for (int d = 0; d < 45; d++) city.Step();
+            city.Place(Id("central_termoelectrica"), 0, 11);
+            city.Place(Id("apartamentos"), 4, 11);
+            city.Place(Id("tienda_abarrotes"), 4, 9);
+            Days(city, 60);
             var copy = CitySave.From(city).ToCity();
-            CollectionAssert.AreEqual(city.Structure, copy.Structure);
+            CollectionAssert.AreEqual(city.Building, copy.Building);
             CollectionAssert.AreEqual(city.Terrain, copy.Terrain);
-            CollectionAssert.AreEqual(city.Level, copy.Level);
             CollectionAssert.AreEqual(city.Anchor, copy.Anchor);
+            CollectionAssert.AreEqual(city.Occupants, copy.Occupants);
             Assert.AreEqual(city.Money, copy.Money);
             Assert.AreEqual(city.Day, copy.Day);
             Assert.AreEqual(city.Population, copy.Population);
@@ -127,71 +159,12 @@ namespace Horizonte.Tests
         }
 
         [Test]
-        public void HomesMergeIntoApartmentsAndAreBulldozedWhole()
-        {
-            var city = Flat();
-            city.Place(Structure.PowerPlant, 4, 8);
-            foreach (var (x, y) in City.Rect(0, 8, 1, 9)) city.Place(Structure.Residential, x, y);
-            foreach (var (x, y) in City.Rect(0, 8, 1, 9)) city.Level[city.Index(x, y)] = 1;
-            city.Refresh();
-            Assert.AreEqual(32, city.Population);
-            Assert.IsTrue(city.Upgrade(1, 9));
-            int anchor = city.Index(0, 8);
-            Assert.AreEqual(2, city.Size[anchor]);
-            Assert.AreEqual(anchor, city.Anchor[city.Index(1, 9)]);
-            Assert.AreEqual(4 * Catalog.Capacity(Structure.Residential, 2), city.Population);
-            var copy = CitySave.From(city).ToCity();
-            Assert.AreEqual(2, copy.Size[anchor]);
-            Assert.AreEqual(anchor, copy.Anchor[copy.Index(1, 9)]);
-            city.Bulldoze(1, 9);
-            city.Refresh();
-            Assert.AreEqual(Structure.None, city.Structure[anchor]);
-            Assert.AreEqual(0, city.Population);
-        }
-
-        [Test]
-        public void HealthBuildingsUnlockAndCoverHomes()
-        {
-            var city = Flat();
-            Assert.AreEqual(PlaceResult.Locked, city.Place(Structure.Hospital, 0, 0));
-            city.Place(Structure.PowerPlant, 4, 8);
-            city.Place(Structure.Residential, 0, 9);
-            city.Level[city.Index(0, 9)] = 1;
-            city.Refresh();
-            Assert.AreEqual(0, city.HealthCoverage);
-            Assert.AreEqual(PlaceResult.Ok, city.Place(Structure.Doctor, 6, 8));
-            city.Refresh();
-            Assert.AreEqual(100, city.HealthCoverage);
-        }
-
-        [Test]
         public void LevelsFollowPopulation()
         {
             Assert.AreEqual(1, Progress.Level(0));
-            Assert.AreEqual(2, Progress.Level(50));
+            Assert.AreEqual(2, Progress.Level(30));
             Assert.AreEqual(Progress.MaxLevel, Progress.Level(1000000));
-            Assert.AreEqual(.5f, Progress.LevelProgress(125), .001f);
             Assert.AreEqual(1f, Progress.LevelProgress(1000000));
-        }
-
-        [Test]
-        public void SatisfactionDropsWithoutPowerAndWithHighTaxes()
-        {
-            var city = Flat();
-            city.Place(Structure.Road, 0, 5);
-            city.Place(Structure.Residential, 0, 4);
-            city.Level[city.Index(0, 4)] = 1;
-            city.Refresh();
-            int unpowered = city.Satisfaction;
-            Assert.Greater(unpowered, 0);
-            city.Place(Structure.PowerPlant, 1, 3);
-            city.Refresh();
-            int powered = city.Satisfaction;
-            Assert.Greater(powered, unpowered);
-            city.TaxRate = 20;
-            city.Refresh();
-            Assert.Less(city.Satisfaction, powered);
-            Assert.AreEqual(0, Progress.FirstOpenGoal(city));
         }
 
         [Test]

@@ -88,8 +88,8 @@ namespace Horizonte.Presentation
         // Bottom bar.
         RectTransform bottomBar, flyout, hintPanel;
         Text hintText;
-        Tools.Category flyoutCategory;
-        readonly List<(Tools.Category cat, Btn button)> categoryButtons = new List<(Tools.Category, Btn)>();
+        Tools.BarItem flyoutItem;
+        readonly List<(Tools.BarItem item, Btn button)> barButtons = new List<(Tools.BarItem, Btn)>();
         Tool currentTool;
         string costText;
 
@@ -99,7 +99,7 @@ namespace Horizonte.Presentation
         Text infoTitle, infoSubtitle, upkeepValue, demolishLabel;
         Btn demolishButton;
         readonly Card[] cards = new Card[4];
-        readonly Row[] rows = new Row[4];
+        readonly Row[] rows = new Row[5];
         Vector2Int selected = new Vector2Int(-1, -1);
 
         // Messages.
@@ -178,7 +178,7 @@ namespace Horizonte.Presentation
             var demand = Block(bar, "Demanda", 140);
             TextAt(demand, 0, 8, 140, 22, 18, TextAnchor.MiddleCenter, UiKit.TextDim).text = "Demanda";
             string[] letters = { "R", "C", "I" };
-            Tool[] zones = { Tool.Residential, Tool.Commercial, Tool.Industrial };
+            Category[] zones = { Category.Housing, Category.Commerce, Category.Industry };
             for (int k = 0; k < 3; k++)
             {
                 float cx = 32 + k * 38;
@@ -187,7 +187,7 @@ namespace Horizonte.Presentation
                 var axis = Rect("Eje", t, new Vector2(0, .5f), new Vector2(1, .5f), Vector2.zero, new Vector2(4, 2));
                 Plain(axis, new Color(1, 1, 1, .45f));
                 var fill = Rect("Relleno", t, new Vector2(.5f, .5f), new Vector2(.5f, .5f), Vector2.zero, new Vector2(12, 0), new Vector2(.5f, 0));
-                Panel(fill, Tools.Swatch(zones[k]), 4, null);
+                Panel(fill, Tools.CategoryColor(zones[k]), 4, null);
                 demandFill[k] = fill;
                 TextAt(demand, cx - 15, 72, 30, 18, 15, TextAnchor.MiddleCenter, UiKit.TextDim, true).text = letters[k];
             }
@@ -444,26 +444,39 @@ namespace Horizonte.Presentation
         void RefreshAlerts(City c)
         {
             alerts.Clear();
-            int unpowered = 0, noRoad = 0, isolated = 0, consumers = 0;
-            for (int i = 0; i < c.Structure.Length; i++)
+            int unpowered = 0, outOfReach = 0, noRoad = 0, isolated = 0, consumers = 0;
+            for (int i = 0; i < c.Building.Length; i++)
             {
-                var s = c.Structure[i];
-                if (s == Structure.None || c.Anchor[i] != i) continue;
-                if (s == Structure.Road)
+                var def = c.DefAt(i);
+                if (def == null || c.Anchor[i] != i) continue;
+                if (def.IsRoad)
                 {
                     if (!c.RoadConnected[i]) isolated++;
                     continue;
                 }
-                if (!c.RoadAccess[i]) noRoad++;
-                if (s == Structure.PowerPlant) continue;
+                if (!c.Served[i]) noRoad++;
+                if (def.Kind == Kind.Power || !c.Served[i]) continue;
                 consumers++;
-                if (!c.Powered[i]) unpowered++;
+                if (c.Powered[i]) continue;
+                unpowered++;
+                bool reached = false;
+                for (int dy = 0; dy < def.Height && !reached; dy++)
+                for (int dx = 0; dx < def.Width && !reached; dx++)
+                    reached = c.PowerCover[i + dy * c.Width + dx];
+                if (!reached) outOfReach++;
             }
-            if (c.PowerSupply == 0 && consumers > 0) alerts.Add("No hay centrales eléctricas: sin luz nada crece.");
+            if (c.PowerSupply == 0 && consumers > 0) alerts.Add("No hay centrales eléctricas: sin luz nada funciona.");
             else if (c.PowerDemand > c.PowerSupply) alerts.Add($"La energía no alcanza: faltan {N(c.PowerDemand - c.PowerSupply)} MW.");
-            if (c.Population >= 300 && c.HealthCoverage < 70) alerts.Add($"{100 - c.HealthCoverage} % de los habitantes no tiene servicio de salud cerca.");
-            if (unpowered > 0 && c.PowerSupply > 0) alerts.Add($"{N(unpowered)} {(unpowered == 1 ? "lote o edificio" : "lotes o edificios")} sin electricidad.");
-            if (noRoad > 0) alerts.Add($"{N(noRoad)} {(noRoad == 1 ? "lote" : "lotes")} sin calle conectada cerca.");
+            if (outOfReach > 0 && c.PowerSupply > 0) alerts.Add($"{N(outOfReach)} {(outOfReach == 1 ? "edificio queda" : "edificios quedan")} lejos de la red: construye una subestación cerca.");
+            else if (unpowered > 0 && c.PowerSupply > 0) alerts.Add($"{N(unpowered)} {(unpowered == 1 ? "edificio" : "edificios")} sin electricidad.");
+            if (noRoad > 0) alerts.Add($"{N(noRoad)} {(noRoad == 1 ? "edificio" : "edificios")} sin calle conectada a la carretera.");
+            foreach (var s in Catalog.Services)
+            {
+                if (c.Population < Catalog.ServiceThreshold(s)) continue;
+                int missing = 100 - c.ServiceCoverage(s);
+                if (missing > 30) alerts.Add($"{missing} % de los habitantes sin {Catalog.ServiceName(s).ToLowerInvariant()}.");
+            }
+            if (c.Workers > c.Jobs + 10) alerts.Add($"Faltan empleos: {N(c.Workers - c.Jobs)} personas buscan trabajo.");
             if (isolated > 0) alerts.Add($"{N(isolated)} {(isolated == 1 ? "tramo" : "tramos")} de calle sin salida a la carretera.");
             if (c.Money < 0) alerts.Add("La tesorería está en números rojos.");
             else if (c.Day >= City.DaysPerMonth && c.LastIncome < c.LastExpenses) alerts.Add("Gastas más de lo que ingresas cada mes.");
@@ -516,15 +529,11 @@ namespace Horizonte.Presentation
             Color grass = new Color(.4f, .55f, .29f), forest = new Color(.22f, .38f, .18f), water = new Color(.2f, .44f, .66f);
             for (int i = 0; i < mapPixels.Length; i++)
             {
-                var s = c.Structure[i];
+                var def = c.DefAt(i);
                 Color col;
-                if (s == Structure.None) col = c.Terrain[i] == Terrain.Water ? water : c.Terrain[i] == Terrain.Forest ? forest : grass;
-                else if (s == Structure.Road) col = new Color(.86f, .87f, .9f);
-                else
-                {
-                    col = Tools.Swatch(ToolOf(s));
-                    if (Catalog.Get(s).IsZone && c.Level[c.Anchor[i]] == 0) col = Color.Lerp(col, grass, .55f);
-                }
+                if (def == null) col = c.Terrain[i] == Terrain.Water ? water : c.Terrain[i] == Terrain.Forest ? forest : grass;
+                else if (def.IsRoad) col = new Color(.86f, .87f, .9f);
+                else col = Tools.CategoryColor(def.Category);
                 mapPixels[i] = col;
             }
             mapTexture.SetPixels32(mapPixels);
@@ -545,16 +554,16 @@ namespace Horizonte.Presentation
 
         void BuildBottomBar()
         {
-            var cats = Tools.Categories;
-            const float w = 112, h = 94, gap = 6;
-            float width = cats.Length * w + (cats.Length - 1) * gap + 12;
+            var items = Tools.Bar;
+            const float w = 96, h = 94, gap = 5;
+            float width = items.Length * w + (items.Length - 1) * gap + 12;
             bottomBar = Rect("Construcción", safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 12), new Vector2(width, h + 12), new Vector2(.5f, 0));
             Panel(bottomBar, UiKit.PanelColor, 20);
-            for (int k = 0; k < cats.Length; k++)
+            for (int k = 0; k < items.Length; k++)
             {
-                var cat = cats[k];
-                var b = MakeButton(bottomBar, cat.Name, 6 + k * (w + gap), 6, w, h, 16, cat.Icon, 44, cat.Name, 21, () => PickCategory(cat), true);
-                categoryButtons.Add((cat, b));
+                var item = items[k];
+                var b = MakeButton(bottomBar, item.Name, 6 + k * (w + gap), 6, w, h, 16, item.Icon, 42, item.Name, 18, () => PickItem(item), true);
+                barButtons.Add((item, b));
             }
 
             hintPanel = Rect("Indicación", safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 132), new Vector2(600, 50), new Vector2(.5f, 0));
@@ -563,55 +572,74 @@ namespace Horizonte.Presentation
             hintText.supportRichText = true;
         }
 
-        void PickCategory(Tools.Category cat)
+        void PickItem(Tools.BarItem item)
         {
-            if (cat.Tools.Length == 1)
+            if (item.Tool.HasValue)
             {
                 CloseFlyout();
-                game.SelectTool(cat.Tools[0]);
+                game.SelectTool(item.Tool.Value);
                 return;
             }
-            if (flyoutCategory == cat)
+            if (flyoutItem == item)
             {
                 CloseFlyout();
                 HighlightCategories();
                 return;
             }
-            OpenFlyout(cat);
+            OpenFlyout(item);
         }
 
-        void OpenFlyout(Tools.Category cat)
+        /// <summary>Menu above the bar with every building of a category: name, what it gives, and price or when it unlocks.</summary>
+        void OpenFlyout(Tools.BarItem item)
         {
             CloseFlyout();
             HideInfo();
-            flyoutCategory = cat;
-            int index = Array.IndexOf(Tools.Categories, cat);
-            var button = categoryButtons[index].button.Root;
+            if (popup != Popup.None) TogglePopup(Popup.None);
+            flyoutItem = item;
+            var category = item.Category.Value;
+            var defs = new List<BuildingDef>(Catalog.InCategory(category));
+            int index = Array.IndexOf(Tools.Bar, item);
+            var button = barButtons[index].button.Root;
             float centre = button.anchoredPosition.x + button.sizeDelta.x * .5f - bottomBar.sizeDelta.x * .5f;
-            const float cw = 200, ch = 140;
-            float flyWidth = cat.Tools.Length * (cw + 8) + 8;
+            float available = safe.rect.width - 24;
+            float cw = Mathf.Min(190, (available - 8) / defs.Count - 8);
+            const float ch = 168, top = 46;
+            float flyWidth = defs.Count * (cw + 8) + 8;
             float limit = Mathf.Max(0, safe.rect.width * .5f - 12 - flyWidth * .5f);
             centre = Mathf.Clamp(centre, -limit, limit);
-            flyout = Rect("Menú " + cat.Name, safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(centre, 128), new Vector2(flyWidth, ch + 16), new Vector2(.5f, 0));
+            flyout = Rect("Menú " + item.Name, safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(centre, 128), new Vector2(flyWidth, ch + top + 8), new Vector2(.5f, 0));
             Panel(flyout, UiKit.PanelColor, 18);
-            for (int k = 0; k < cat.Tools.Length; k++)
+            TextAt(flyout, 16, 6, flyWidth - 32, 36, 22, TextAnchor.MiddleLeft, Color.white, true).text = Tools.CategoryName(category);
+            var tint = Tools.CategoryColor(category);
+            for (int k = 0; k < defs.Count; k++)
             {
-                var tool = cat.Tools[k];
-                var b = MakeButton(flyout, Tools.Label(tool), 8 + k * (cw + 8), 8, cw, ch, 14, Tools.Icon(tool), 50, null, 0, () =>
+                var def = defs[k];
+                var tool = Tool.Build(def.Id);
+                bool locked = game.City.Population < def.MinPopulation;
+                var b = MakeButton(flyout, def.Name, 8 + k * (cw + 8), top, cw, ch, 14, Tools.Icon(def), 40, null, 0, () =>
                 {
+                    if (locked)
+                    {
+                        Toast($"{def.Name} se desbloquea con {N(def.MinPopulation)} habitantes");
+                        return;
+                    }
                     CloseFlyout();
                     game.SelectTool(tool);
                 }, true);
-                b.Icon.rectTransform.anchoredPosition = new Vector2(cw * .5f, -40);
-                b.Icon.color = Tools.Swatch(tool) * 1.3f;
-                TextAt(b.Root, 0, 74, cw, 28, 21, TextAnchor.MiddleCenter, Color.white, true).text = Tools.Label(tool);
-                int needed = Catalog.Get(Tools.ToStructure(tool))?.MinPopulation ?? 0;
-                bool locked = game.City.Population < needed;
-                var price = TextAt(b.Root, 0, 102, cw, 26, 19, TextAnchor.MiddleCenter, locked ? UiKit.Bad : UiKit.Gold, true);
-                price.text = locked ? $"Desde {N(needed)} hab." : Tools.CostLabel(tool);
-                if (locked) b.Icon.color = new Color(1, 1, 1, .35f);
+                b.Icon.rectTransform.anchoredPosition = new Vector2(cw * .5f, -32);
+                b.Icon.color = locked ? new Color(1, 1, 1, .3f) : Color.Lerp(tint, Color.white, .25f);
+                var name = TextAt(b.Root, 6, 56, cw - 12, 44, 17, TextAnchor.MiddleCenter, locked ? UiKit.TextDim : Color.white, true);
+                name.text = def.Name;
+                name.lineSpacing = .9f;
+                var summary = TextAt(b.Root, 4, 102, cw - 8, 22, 15, TextAnchor.MiddleCenter, UiKit.TextDim);
+                summary.text = $"{def.Width}×{def.Height}  ·  {def.Summary}";
+                FitOneLine(summary, 11);
+                var price = TextAt(b.Root, 0, 128, cw, 28, 18, TextAnchor.MiddleCenter, locked ? UiKit.Bad : UiKit.Gold, true);
+                price.text = locked ? $"Desde {N(def.MinPopulation)} hab." : Tools.CostLabel(tool);
+                FitOneLine(price, 12);
                 b.Glow.gameObject.SetActive(tool == currentTool);
                 if (tool == currentTool) b.Back.color = UiKit.Accent;
+                if (locked) b.Back.color = new Color(.08f, .12f, .2f, .9f);
             }
             HighlightCategories();
             UpdateHint();
@@ -621,7 +649,7 @@ namespace Horizonte.Presentation
         {
             if (flyout != null) Destroy(flyout.gameObject);
             flyout = null;
-            flyoutCategory = null;
+            flyoutItem = null;
             UpdateHint();
         }
 
@@ -635,9 +663,12 @@ namespace Horizonte.Presentation
 
         void HighlightCategories()
         {
-            foreach (var (cat, b) in categoryButtons)
+            var def = currentTool.Def;
+            foreach (var (item, b) in barButtons)
             {
-                bool on = flyoutCategory != null ? flyoutCategory == cat : Array.IndexOf(cat.Tools, currentTool) >= 0;
+                bool on = flyoutItem != null ? flyoutItem == item
+                    : item.Tool.HasValue ? item.Tool.Value == currentTool
+                    : def != null && item.Category == def.Category;
                 b.Back.color = on ? UiKit.Accent : Color.clear;
                 b.Edge.color = on ? UiKit.AccentEdge : Color.clear;
                 b.Glow.gameObject.SetActive(on);
@@ -752,7 +783,6 @@ namespace Horizonte.Presentation
             var c = game.City;
             if (selected.x < 0) return;
             int i = c.Index(selected.x, selected.y);
-            var s = c.Structure[i];
             foreach (var card in cards) card.Root.gameObject.SetActive(false);
             foreach (var row in rows) row.Root.gameObject.SetActive(false);
             int nCards = 0, nRows = 0;
@@ -784,83 +814,96 @@ namespace Horizonte.Presentation
             Color desireColor = desire > 0 ? UiKit.Good : desire < 0 ? UiKit.Bad : Color.white;
             int upkeep = 0;
             string demolish = null;
+            var def = c.DefAt(i);
 
-            if (s == Structure.None)
+            if (def == null)
             {
                 var t = c.Terrain[i];
                 infoTitle.text = t == Terrain.Water ? "Río" : t == Terrain.Forest ? "Bosque" : "Terreno libre";
-                infoSubtitle.text = t == Terrain.Water ? "No se puede construir" : "Terreno";
+                infoSubtitle.text = t == Terrain.Water ? "Solo se cruza con un puente" : "Terreno";
                 infoTile.color = t == Terrain.Water ? new Color(.2f, .48f, .72f) : t == Terrain.Forest ? new Color(.22f, .45f, .22f) : new Color(.45f, .62f, .32f);
                 infoIcon.sprite = Icons.Get(t == Terrain.Water ? "water" : t == Terrain.Forest ? "forest" : "explore");
                 AddCard("star", UiKit.Gold, "Atractivo", Signed(desire), desireColor);
-                var (access, accessColor) = YesNo(c.RoadAccess[i]);
-                if (t != Terrain.Water) AddCard("road", blue, "Calle cercana", access, accessColor);
+                if (t != Terrain.Water)
+                {
+                    var (power, powerColor) = YesNo(c.PowerCover[i]);
+                    AddCard("bolt", UiKit.Warn, "Red eléctrica", power, powerColor);
+                }
                 if (t == Terrain.Forest) demolish = $"Talar  ·  $ {Catalog.ClearForestCost}";
                 game.View.ClearSelection();
             }
             else
             {
-                var def = Catalog.Get(s);
                 int a = c.Anchor[i] >= 0 ? c.Anchor[i] : i;
-                int level = c.Level[a];
-                var tool = ToolOf(s);
-                infoTile.color = Tools.Swatch(tool);
-                infoIcon.sprite = Icons.Get(Tools.Icon(tool));
-                infoTitle.text = def.IsZone ? ZoneTitle(s, level, c.Size[a]) : def.Name;
-                infoSubtitle.text = Subtitle(s, level);
+                infoTile.color = Tools.CategoryColor(def.Category);
+                infoIcon.sprite = Icons.Get(Tools.Icon(def));
+                infoTitle.text = def.Name;
+                infoSubtitle.text = Tools.CategoryName(def.Category);
                 upkeep = def.Upkeep;
                 demolish = $"Demoler  ·  $ {Catalog.BulldozeCost}";
-                var (power, powerColor) = YesNo(c.Powered[i]);
-                var (access, accessColor) = YesNo(c.RoadAccess[i]);
-                if (def.IsZone)
+                var (power, powerColor) = YesNo(c.Powered[a]);
+                var (street, streetColor) = YesNo(c.Served[a]);
+                bool working = c.Working(a);
+                switch (def.Kind)
                 {
-                    bool homes = s == Structure.Residential;
-                    AddCard("level", blue, "Nivel", $"{level} / {Catalog.MaxLevel}", Color.white, level / (float)Catalog.MaxLevel);
-                    AddCard(homes ? "people" : "briefcase", blue, homes ? "Habitantes" : "Empleos", N(Catalog.Capacity(s, level) * c.Size[a] * c.Size[a]), Color.white);
-                    AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
-                    AddCard("road", blue, "Calle cercana", access, accessColor);
-                    AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{Catalog.PowerUse(s, level) * c.Size[a] * c.Size[a]} MW", Color.white);
-                    AddRow("star", UiKit.Gold, "Atractivo del lugar", Signed(desire), desireColor);
-                    int d = Mathf.RoundToInt(c.Demand(s) * 100);
-                    AddRow("chart", blue, "Demanda de la zona", $"{(d > 0 ? "+" : "")}{d} %", d > 0 ? UiKit.Good : d < 0 ? UiKit.Bad : Color.white);
-                    if (homes) AddRow("cross", new Color(1f, .55f, .55f), "Servicio de salud", c.HealthCover[i] ? "Sí" : "No", c.HealthCover[i] ? UiKit.Good : UiKit.Bad);
+                    case Kind.Road:
+                        bool connected = c.RoadConnected[i];
+                        AddCard("road", blue, "Conexión", connected ? "Con salida" : "Aislada", connected ? UiKit.Good : UiKit.Bad);
+                        AddCard("star", UiKit.Gold, "Atractivo", Signed(desire), desireColor);
+                        break;
+                    case Kind.Housing:
+                        AddCard("people", blue, "Habitantes", $"{N(c.Occupants[a])} / {N(def.Residents)}", Color.white, c.Occupants[a] / (float)def.Residents);
+                        int mood = Mathf.Clamp(Mathf.RoundToInt((float)c.HomeSatisfaction(a)), 0, 100);
+                        AddCard("smile", mood >= 70 ? UiKit.Good : mood >= 45 ? UiKit.Warn : UiKit.Bad, "Satisfacción", $"{mood} %", Color.white, mood / 100f);
+                        AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
+                        AddCard("road", blue, "Calle conectada", street, streetColor);
+                        // Services that reach this home, and the first one it misses.
+                        int have = 0;
+                        string missing = null;
+                        foreach (var s in Catalog.Services)
+                        {
+                            if (c.Covered(a, s)) have++;
+                            else if (missing == null && c.Population >= Catalog.ServiceThreshold(s)) missing = Catalog.ServiceName(s);
+                        }
+                        AddRow("cross", new Color(1f, .6f, .6f), "Servicios cerca", $"{have} de {Catalog.Services.Length}", Color.white);
+                        if (missing != null) AddRow("warning", UiKit.Warn, "Le falta", missing, UiKit.Bad);
+                        AddRow("star", UiKit.Gold, "Atractivo del lugar", Signed(desire), desireColor);
+                        break;
+                    case Kind.Jobs:
+                        AddCard("briefcase", blue, "Empleos", working ? N(def.Jobs) : "0", working ? Color.white : UiKit.Bad);
+                        AddCard("factory", blue, "Tipo", def.Industrial ? "Industria" : "Comercio", Color.white);
+                        AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
+                        AddCard("road", blue, "Calle conectada", street, streetColor);
+                        AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{def.PowerUse} MW", Color.white);
+                        if (def.Desirability != 0) AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), def.Desirability > 0 ? UiKit.Good : UiKit.Bad);
+                        break;
+                    case Kind.Power:
+                        float use = c.PowerSupply > 0 ? c.PowerDemand / (float)c.PowerSupply : 0;
+                        if (def.PowerSupply > 0) AddCard("bolt", UiKit.Warn, "Producción", working ? $"{N(def.PowerSupply)} MW" : "0 MW", working ? Color.white : UiKit.Bad);
+                        AddCard("radius", blue, "Alcance de la red", $"{def.PowerReach} casillas", Color.white);
+                        AddCard("chart", blue, "Uso de la red", $"{Mathf.RoundToInt(use * 100)} %", use > 1 ? UiKit.Bad : Color.white, use);
+                        AddCard("road", blue, "Calle conectada", street, streetColor);
+                        AddRow("bolt", UiKit.Warn, "Consumo de la ciudad", $"{N(c.PowerDemand)} MW", Color.white);
+                        if (def.Desirability != 0) AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), UiKit.Bad);
+                        break;
+                    default:
+                        if (def.Service != Service.None)
+                        {
+                            AddCard("radius", blue, "Alcance", $"{def.Radius} casillas", Color.white);
+                            int coverage = c.ServiceCoverage(def.Service);
+                            AddCard("people", blue, "Cobertura", $"{coverage} %", Color.white, coverage / 100f);
+                        }
+                        else AddCard("star", UiKit.Gold, def.CityBonus > 0 ? "Satisfacción" : "Atractivo", def.CityBonus > 0 ? $"+{def.CityBonus}" : Signed(def.Desirability), UiKit.Good);
+                        AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
+                        AddCard("road", blue, "Calle conectada", street, streetColor);
+                        if (def.Service != Service.None) AddRow("cross", new Color(1f, .6f, .6f), "Servicio", Catalog.ServiceName(def.Service), Color.white);
+                        AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{def.PowerUse} MW", Color.white);
+                        if (def.PowerSupply > 0) AddRow("bolt", UiKit.Warn, "Produce", $"{def.PowerSupply} MW", Color.white);
+                        if (def.Desirability != 0) AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), def.Desirability > 0 ? UiKit.Good : UiKit.Bad);
+                        break;
                 }
-                else if (s == Structure.Road)
-                {
-                    bool connected = c.RoadConnected[i];
-                    AddCard("road", blue, "Conexión", connected ? "Con salida" : "Aislada", connected ? UiKit.Good : UiKit.Bad);
-                    AddCard("star", UiKit.Gold, "Atractivo", Signed(desire), desireColor);
-                }
-                else if (s == Structure.PowerPlant)
-                {
-                    float use = c.PowerSupply > 0 ? c.PowerDemand / (float)c.PowerSupply : 0;
-                    AddCard("bolt", UiKit.Warn, "Producción", $"{def.PowerSupply} MW", Color.white);
-                    AddCard("chart", blue, "Uso de la red", $"{Mathf.RoundToInt(use * 100)} %", use > 1 ? UiKit.Bad : Color.white, use);
-                    AddCard("road", blue, "Calle cercana", access, accessColor);
-                    AddCard("radius", blue, "Contamina", $"{def.Radius} casillas", Color.white);
-                    AddRow("bolt", UiKit.Warn, "Consumo de la ciudad", $"{N(c.PowerDemand)} MW", Color.white);
-                    AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), UiKit.Bad);
-                }
-                else if (def.IsHealth)
-                {
-                    AddCard("radius", blue, "Alcance", $"{def.Radius} casillas", Color.white);
-                    AddCard("people", blue, "Cobertura", $"{c.HealthCoverage} %", Color.white, c.HealthCoverage / 100f);
-                    AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
-                    AddCard("road", blue, "Calle cercana", access, accessColor);
-                    AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{def.PowerUse} MW", Color.white);
-                    AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), UiKit.Good);
-                    AddRow("level", blue, "Tamaño", $"{def.Width} × {def.Height} casillas", Color.white);
-                }
-                else
-                {
-                    AddCard("radius", blue, "Alcance", $"{def.Radius} casillas", Color.white);
-                    AddCard("star", UiKit.Gold, "Atractivo", Signed(def.Desirability), UiKit.Good);
-                    AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
-                    AddCard("road", blue, "Calle cercana", access, accessColor);
-                    AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{Catalog.PowerUse(s, level)} MW", Color.white);
-                    AddRow("star", UiKit.Gold, "Atractivo del lugar", Signed(desire), desireColor);
-                }
-                game.View.SetSelection(a % c.Width, a / c.Width, c.FootprintWidth(a), c.FootprintHeight(a));
+                if (!def.IsRoad && !working) AddRow("warning", UiKit.Bad, "No funciona", !c.Served[a] ? "sin calle conectada" : "sin electricidad", UiKit.Bad);
+                game.View.SetSelection(a % c.Width, a / c.Width, def.Width, def.Height);
             }
 
             // Stack the sections that are in use.
@@ -876,7 +919,7 @@ namespace Horizonte.Presentation
             if (upkeep > 0)
             {
                 upkeepRow.anchoredPosition = new Vector2(14, -y);
-                upkeepValue.text = s == Structure.Road ? $"$ {upkeep} /mes por casilla" : $"$ {N(upkeep)} /mes";
+                upkeepValue.text = def.IsRoad ? $"$ {upkeep} /mes por casilla" : $"$ {N(upkeep)} /mes";
                 y += 46 + 12;
             }
             demolishButton.Root.gameObject.SetActive(demolish != null);
@@ -887,43 +930,6 @@ namespace Horizonte.Presentation
                 y += 54 + 12;
             }
             infoPanel.sizeDelta = new Vector2(430, y + 2);
-        }
-
-        static string ZoneTitle(Structure s, int level, int size)
-        {
-            if (level == 0) return s == Structure.Residential ? "Lote residencial" : s == Structure.Commercial ? "Lote comercial" : "Lote industrial";
-            string[] names = s == Structure.Residential ? new[] { "Casa", size >= 4 ? "Conjunto residencial" : "Apartamentos", "Torre residencial" }
-                : s == Structure.Commercial ? new[] { "Tienda", "Oficinas", "Torre de oficinas" }
-                : new[] { "Taller", "Fábrica", "Planta industrial" };
-            return names[Mathf.Clamp(level, 1, 3) - 1];
-        }
-
-        static string Subtitle(Structure s, int level)
-        {
-            switch (s)
-            {
-                case Structure.Residential: return level == 0 ? "Vivienda  ·  esperando quien construya" : "Vivienda";
-                case Structure.Commercial: return level == 0 ? "Comercio  ·  esperando quien construya" : "Comercio";
-                case Structure.Industrial: return level == 0 ? "Industria  ·  esperando quien construya" : "Industria";
-                case Structure.Road: return "Infraestructura";
-                case Structure.PowerPlant: return "Energía  ·  servicio público";
-                case Structure.Park: return "Recreación";
-                case Structure.Police: return "Seguridad  ·  servicio público";
-                case Structure.School: return "Educación  ·  servicio público";
-                case Structure.Doctor:
-                case Structure.Lab:
-                case Structure.Clinic:
-                case Structure.Emergency:
-                case Structure.Hospital:
-                case Structure.SpecialistHospital: return "Salud  ·  servicio público";
-                default: return "";
-            }
-        }
-
-        static Tool ToolOf(Structure s)
-        {
-            foreach (var t in Tools.All) if (Tools.ToStructure(t) == s) return t;
-            return Tool.Explore;
         }
 
         // ================================================================ messages
@@ -1067,7 +1073,7 @@ namespace Horizonte.Presentation
         public void Showcase(string what)
         {
             if (what == "finanzas") TogglePopup(Popup.Finance);
-            foreach (var cat in Tools.Categories) if (cat.Name == what) PickCategory(cat);
+            foreach (var item in Tools.Bar) if (item.Name == what) PickItem(item);
         }
 
         static string Signed(int v) => v > 0 ? $"+{N(v)}" : v < 0 ? $"−{N(-v)}" : "0";

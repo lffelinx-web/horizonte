@@ -164,10 +164,10 @@ namespace Horizonte.Presentation
 
         IEnumerator CloseUp(string folder, string file, Func<int, bool> pick, float distance)
         {
-            for (int i = 0; i < City.Structure.Length; i++)
+            for (int i = 0; i < City.Building.Length; i++)
             {
                 if (City.Anchor[i] != i || !pick(i)) continue;
-                int w = City.FootprintWidth(i), h = City.FootprintHeight(i);
+                int w = City.DefAt(i).Width, h = City.DefAt(i).Height;
                 Rig.Focus = new Vector3((i % City.Width + w * .5f) * CityView.TileSize, 0, (i / City.Width + h * .5f) * CityView.TileSize);
                 Rig.Yaw = 0;
                 Rig.Distance = distance;
@@ -187,11 +187,11 @@ namespace Horizonte.Presentation
             if (HasArg("-vitrina"))
             {
                 int shot = 0;
-                for (int i = 0; i < City.Structure.Length; i++)
+                for (int i = 0; i < City.Building.Length; i++)
                 {
-                    var s = City.Structure[i];
-                    if (City.Anchor[i] != i || s == Simulation.Structure.Road || s == Simulation.Structure.PowerPlant) continue;
-                    float size = Mathf.Max(City.FootprintWidth(i), City.FootprintHeight(i)) * CityView.TileSize;
+                    var def = City.DefAt(i);
+                    if (City.Anchor[i] != i || def == null || def.IsRoad) continue;
+                    float size = Mathf.Max(def.Width, def.Height) * CityView.TileSize;
                     yield return CloseUp(folder, $"vitrina_{++shot:00}.png", j => j == i, size * 1.6f + 30);
                 }
                 Application.Quit();
@@ -209,10 +209,13 @@ namespace Horizonte.Presentation
             }
             if (HasArg("-inspeccion"))
             {
-                // The tallest home in town, with its panel open.
+                // The biggest home in town, with its panel open.
                 int best = 0;
-                for (int i = 0; i < City.Structure.Length; i++)
-                    if (City.Structure[i] == Simulation.Structure.Residential && City.Level[i] > City.Level[best]) best = i;
+                for (int i = 0; i < City.Building.Length; i++)
+                {
+                    var d = City.DefAt(i);
+                    if (d != null && d.Kind == Kind.Housing && City.Anchor[i] == i && (City.DefAt(best) == null || d.Residents > City.DefAt(best).Residents)) best = i;
+                }
                 Rig.Focus = CityView.TileCentre(best % City.Width, best / City.Width);
                 Rig.Yaw = 35;
                 Rig.Distance = 140;
@@ -224,14 +227,14 @@ namespace Horizonte.Presentation
 
                 // Close-ups to check that models face the street (rotation 0 faces south, toward a camera at yaw 0).
                 Hud.HideInfo();
-                yield return CloseUp(folder, "captura_casa.png", i => City.Structure[i] == Simulation.Structure.Residential && City.Level[i] == 1 && City.Rotation[i] == 0, 45);
-                yield return CloseUp(folder, "captura_edificios.png", i => City.Structure[i] == Simulation.Structure.Residential && City.Size[i] >= 2 && City.Rotation[i] == 0, 110);
-                yield return CloseUp(folder, "captura_salud.png", i => City.Structure[i] == Simulation.Structure.Clinic, 90);
+                yield return CloseUp(folder, "captura_casa.png", i => City.DefAt(i)?.Model == "casa_ampliada" && City.Rotation[i] == 0, 45);
+                yield return CloseUp(folder, "captura_edificios.png", i => City.DefAt(i)?.Model == "apartamentos", 110);
+                yield return CloseUp(folder, "captura_servicio.png", i => City.DefAt(i)?.Model == "escuela_primaria", 90);
 
                 // Pop-up, building menu and a message.
                 SelectTool(Tool.Explore);
                 Hud.Showcase("finanzas");
-                Hud.Showcase("Servicios");
+                Hud.Showcase("Parques");
                 Hud.Toast("Ejemplo de aviso");
                 for (int f = 0; f < 10; f++) yield return null;
                 ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_interfaz_2.png"));
