@@ -95,49 +95,23 @@ namespace Horizonte.Presentation
             City = CityGenerator.Create(seed: (uint)DateTime.Now.Ticks);
             Attach(Rig.Cam);
             Save();
+            Hud.HideInfo();
             SelectTool(Tool.Explore);
             Hud.Refresh();
         }
 
-        public void Inspect(int x, int y)
+        public void Inspect(int x, int y) => Hud.Select(x, y);
+
+        public void Demolish(int x, int y)
         {
-            if (!City.InBounds(x, y))
+            if (!City.Bulldoze(x, y))
             {
-                Hud.HideInfo();
+                Hud.Toast("No alcanza el dinero para demoler");
                 return;
             }
-            int i = City.Index(x, y);
-            var s = City.Structure[i];
-            string text;
-            if (s == Structure.None)
-            {
-                string terrain = City.Terrain[i] == Simulation.Terrain.Water ? "Río" : City.Terrain[i] == Simulation.Terrain.Forest ? "Bosque" : "Terreno libre";
-                text = $"<b>{terrain}</b>\nAtractivo {Signed(City.Desirability[i])}";
-            }
-            else
-            {
-                var def = Catalog.Get(s);
-                int a = City.Anchor[i] >= 0 ? City.Anchor[i] : i;
-                int level = City.Level[a];
-                text = $"<b>{def.Name}</b>";
-                if (def.IsZone)
-                {
-                    text += level == 0 ? "\nLote vacío, esperando construcción" : $" · nivel {level}";
-                    int cap = Catalog.Capacity(s, level);
-                    if (level > 0) text += s == Structure.Residential ? $"\n{cap} habitantes" : $"\n{cap} empleos";
-                    text += $"\nCalle cercana: {YesNo(City.RoadAccess[i])}";
-                }
-                if (s != Structure.Road) text += $"\nElectricidad: {YesNo(City.Powered[i])}";
-                if (s == Structure.PowerPlant) text += $"\nProduce {def.PowerSupply} de energía";
-                if (s == Structure.Road) text += City.RoadConnected[i] ? "\nConectada con la carretera" : "\nSin conexión con la carretera";
-                text += $"\nAtractivo {Signed(City.Desirability[i])}";
-                if (def.Upkeep > 0) text += $"\nMantenimiento ${def.Upkeep}/mes";
-            }
-            Hud.ShowInfo(text);
+            Hud.HideInfo();
+            Hud.Refresh();
         }
-
-        static string YesNo(bool v) => v ? "sí" : "<color=#FF8A73>no</color>";
-        static string Signed(int v) => v > 0 ? $"+{v}" : v.ToString();
 
         // ---------------------------------------------------------------- saving
 
@@ -205,11 +179,26 @@ namespace Horizonte.Presentation
             }
             if (HasArg("-inspeccion"))
             {
-                SelectTool(Tool.Road);
-                Inspect(City.Width / 2 - 4, City.Height / 2 + 1);
-                Hud.Toast("Ejemplo de aviso");
+                // The tallest home in town, with its panel open.
+                int best = 0;
+                for (int i = 0; i < City.Structure.Length; i++)
+                    if (City.Structure[i] == Simulation.Structure.Residential && City.Level[i] > City.Level[best]) best = i;
+                Rig.Focus = CityView.TileCentre(best % City.Width, best / City.Width);
+                Rig.Yaw = 35;
+                Rig.Distance = 110;
+                Inspect(best % City.Width, best / City.Width);
                 for (int f = 0; f < 10; f++) yield return null;
                 ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_interfaz.png"));
+                yield return null;
+                yield return null;
+
+                // Pop-up, building menu and a message.
+                SelectTool(Tool.Explore);
+                Hud.Showcase("finanzas");
+                Hud.Showcase("Servicios");
+                Hud.Toast("Ejemplo de aviso");
+                for (int f = 0; f < 10; f++) yield return null;
+                ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_interfaz_2.png"));
                 yield return null;
                 yield return null;
             }

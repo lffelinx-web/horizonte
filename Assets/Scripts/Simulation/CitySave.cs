@@ -13,6 +13,7 @@ namespace Horizonte.Simulation
         public long money;
         public int day, taxRate;
         public uint rng;
+        public string name;
         public string terrain, structure, level, rotation;
 
         public static CitySave From(City city)
@@ -33,6 +34,7 @@ namespace Horizonte.Simulation
                 day = city.Day,
                 taxRate = city.TaxRate,
                 rng = city.RngState,
+                name = city.Name,
                 terrain = Convert.ToBase64String(terrain),
                 structure = Convert.ToBase64String(structure),
                 level = Convert.ToBase64String(city.Level),
@@ -44,6 +46,7 @@ namespace Horizonte.Simulation
         {
             if (version != CurrentVersion) throw new InvalidOperationException($"Unknown save version {version}.");
             var city = new City(width, height, rng) { Money = money, Day = day, TaxRate = taxRate };
+            if (!string.IsNullOrEmpty(name)) city.Name = name;
             int n = width * height;
             var t = Convert.FromBase64String(terrain);
             var s = Convert.FromBase64String(structure);

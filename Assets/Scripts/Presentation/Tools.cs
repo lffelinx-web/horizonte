@@ -35,9 +35,9 @@ namespace Horizonte.Presentation
         public static string CostLabel(Tool t)
         {
             if (t == Tool.Explore) return "";
-            if (t == Tool.Bulldoze) return $"${Catalog.BulldozeCost}";
+            if (t == Tool.Bulldoze) return $"$ {Catalog.BulldozeCost} por casilla";
             var def = Catalog.Get(ToStructure(t));
-            return def.Type == Structure.Road || def.IsZone ? $"${def.Cost}/casilla" : $"${def.Cost:N0}";
+            return def.Type == Structure.Road || def.IsZone ? $"$ {def.Cost} por casilla" : $"$ {def.Cost:N0}";
         }
 
         public static Color Swatch(Tool t)
@@ -54,6 +54,55 @@ namespace Horizonte.Presentation
                 case Tool.School: return new Color(.82f, .45f, .25f);
                 case Tool.Bulldoze: return new Color(.92f, .35f, .3f);
                 default: return new Color(.85f, .85f, .85f);
+            }
+        }
+
+        /// <summary>A button on the bottom bar; categories with several tools open a small menu.</summary>
+        public sealed class Category
+        {
+            public string Name, Icon;
+            public Tool[] Tools;
+        }
+
+        public static readonly Category[] Categories =
+        {
+            new Category { Name = "Explorar", Icon = "explore", Tools = new[] { Tool.Explore } },
+            new Category { Name = "Calles", Icon = "road", Tools = new[] { Tool.Road } },
+            new Category { Name = "Vivienda", Icon = "house", Tools = new[] { Tool.Residential } },
+            new Category { Name = "Comercio", Icon = "shop", Tools = new[] { Tool.Commercial } },
+            new Category { Name = "Industria", Icon = "factory", Tools = new[] { Tool.Industrial } },
+            new Category { Name = "Energía", Icon = "bolt", Tools = new[] { Tool.PowerPlant } },
+            new Category { Name = "Servicios", Icon = "cross", Tools = new[] { Tool.Police, Tool.School } },
+            new Category { Name = "Parques", Icon = "tree", Tools = new[] { Tool.Park } },
+            new Category { Name = "Demoler", Icon = "bulldoze", Tools = new[] { Tool.Bulldoze } },
+        };
+
+        public static string Icon(Tool t)
+        {
+            switch (t)
+            {
+                case Tool.Road: return "road";
+                case Tool.Residential: return "house";
+                case Tool.Commercial: return "shop";
+                case Tool.Industrial: return "factory";
+                case Tool.PowerPlant: return "bolt";
+                case Tool.Park: return "tree";
+                case Tool.Police: return "shield";
+                case Tool.School: return "school";
+                case Tool.Bulldoze: return "bulldoze";
+                default: return "explore";
+            }
+        }
+
+        /// <summary>One line on how the tool is used, shown above the bar while it is selected.</summary>
+        public static string Hint(Tool t)
+        {
+            switch (ShapeOf(t))
+            {
+                case Shape.Line: return $"{Label(t)}  ·  {CostLabel(t)}  ·  arrastra para trazar";
+                case Shape.Rect: return t == Tool.Bulldoze ? $"Demoler  ·  {CostLabel(t)}  ·  arrastra sobre lo que quieras quitar" : $"Zona {Label(t).ToLowerInvariant()}  ·  {CostLabel(t)}  ·  arrastra para marcar un área";
+                case Shape.Single: return $"{Label(t)}  ·  {CostLabel(t)}  ·  toca donde quieras construir";
+                default: return null;
             }
         }
 

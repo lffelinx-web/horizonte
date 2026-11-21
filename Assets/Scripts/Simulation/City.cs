@@ -33,6 +33,7 @@ namespace Horizonte.Simulation
 
         public long Money;
         public int Day;
+        public string Name = "Horizonte";
         public int TaxRate = 9;
         public uint RngState;
 
@@ -47,6 +48,8 @@ namespace Horizonte.Simulation
         public float DemandIndustrial { get; private set; }
         public int LastIncome { get; private set; }
         public int LastExpenses { get; private set; }
+        /// <summary>How happy residents are, 0 to 100 (0 while nobody lives in the city).</summary>
+        public int Satisfaction { get; private set; }
 
         public int Month => Day / DaysPerMonth % MonthsPerYear;
         public int Year => Day / (DaysPerMonth * MonthsPerYear) + 1;
@@ -426,6 +429,37 @@ namespace Horizonte.Simulation
             Population = pop;
             CommercialJobs = com;
             IndustrialJobs = ind;
+            Satisfaction = ComputeSatisfaction();
+        }
+
+        int ComputeSatisfaction()
+        {
+            // Weighted by residents: pleasant, served homes make happy people; jobs and low taxes help.
+            double score = 0, weight = 0;
+            for (int i = 0; i < Structure.Length; i++)
+            {
+                if (Structure[i] != Simulation.Structure.Residential || Level[i] == 0) continue;
+                int cap = Catalog.Capacity(Structure[i], Level[i]);
+                double s = 62 + Desirability[i] * .4;
+                if (!Powered[i]) s -= 30;
+                if (!RoadAccess[i]) s -= 20;
+                score += s * cap;
+                weight += cap;
+            }
+            if (weight == 0) return 0;
+            double avg = score / weight;
+            double workers = Population * .6;
+            if (workers > 0 && Jobs < workers) avg -= (1 - Jobs / workers) * 25;
+            avg -= (TaxRate - 9) * 2.5;
+            return (int)Math.Round(Math.Max(1, Math.Min(100, avg)));
+        }
+
+        /// <summary>Buildings of a type (multi-tile buildings count once).</summary>
+        public int Count(Structure type)
+        {
+            int count = 0;
+            for (int i = 0; i < Structure.Length; i++) if (Structure[i] == type && Anchor[i] == i) count++;
+            return count;
         }
 
         void UpdateDemand()

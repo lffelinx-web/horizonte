@@ -29,6 +29,39 @@ namespace Horizonte.Presentation
         Transform buildingRoot;
         BuildingFactory factory;
 
+        MeshFilter selectionFilter;
+        readonly MeshBuilder selectionMesh = new MeshBuilder(1);
+
+        /// <summary>Draws a glowing frame on the ground around a building footprint, in tiles.</summary>
+        public void SetSelection(int x, int y, int w, int h)
+        {
+            if (selectionFilter == null)
+            {
+                var go = new GameObject("Selección", typeof(MeshFilter), typeof(MeshRenderer));
+                go.transform.SetParent(transform, false);
+                var mr = go.GetComponent<MeshRenderer>();
+                mr.sharedMaterial = Palette.Get("Selection");
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                selectionFilter = go.GetComponent<MeshFilter>();
+                selectionFilter.sharedMesh = new Mesh();
+            }
+            const float inset = .35f, width = .7f, lift = .32f;
+            float x0 = x * TileSize + inset, z0 = y * TileSize + inset;
+            float x1 = (x + w) * TileSize - inset, z1 = (y + h) * TileSize - inset;
+            selectionMesh.Clear();
+            selectionMesh.Flat(0, x0, z0, x1, z0 + width, lift);
+            selectionMesh.Flat(0, x0, z1 - width, x1, z1, lift);
+            selectionMesh.Flat(0, x0, z0 + width, x0 + width, z1 - width, lift);
+            selectionMesh.Flat(0, x1 - width, z0 + width, x1, z1 - width, lift);
+            selectionFilter.sharedMesh = selectionMesh.ToMesh(selectionFilter.sharedMesh);
+            selectionFilter.gameObject.SetActive(true);
+        }
+
+        public void ClearSelection()
+        {
+            if (selectionFilter != null) selectionFilter.gameObject.SetActive(false);
+        }
+
         public static Vector3 TileCentre(int x, int y) => new Vector3((x + .5f) * TileSize, 0, (y + .5f) * TileSize);
 
         public void Init(City c)
@@ -36,6 +69,7 @@ namespace Horizonte.Presentation
             city = c;
             factory = new BuildingFactory();
             foreach (Transform child in transform) Destroy(child.gameObject);
+            selectionFilter = null;
             buildings.Clear();
             buildingRoot = new GameObject("Edificios").transform;
             buildingRoot.SetParent(transform, false);

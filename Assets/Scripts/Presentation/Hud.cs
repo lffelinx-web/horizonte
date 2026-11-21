@@ -1,29 +1,110 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Horizonte.Simulation;
 using UnityEngine;
 using UnityEngine.UI;
+using Terrain = Horizonte.Simulation.Terrain;
 
 namespace Horizonte.Presentation
 {
-    /// <summary>On-screen interface, built in code: city stats, demand, speed, taxes and the tool bar.</summary>
+    /// <summary>
+    /// On-screen interface, built in code: the top bar with the city's numbers, goals, alerts and finances on the left,
+    /// the minimap, the building bar at the bottom, and the panel that describes the selected building.
+    /// </summary>
     public sealed class Hud : MonoBehaviour
     {
         static readonly string[] MonthNames = { "Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic" };
-        static readonly Color PanelColor = new Color(.08f, .1f, .13f, .78f);
-        static readonly Color ButtonColor = new Color(.16f, .19f, .24f, .92f);
-        static readonly Color SelectedColor = new Color(.95f, .78f, .3f, 1);
+        static readonly NumberFormatInfo Numbers = new NumberFormatInfo { NumberGroupSeparator = " ", NumberDecimalSeparator = "," };
+
+        /// <summary>Whole number with spaces between thousands, as written in Spanish.</summary>
+        public static string N(long v) => v.ToString("#,0", Numbers);
+
+        enum Popup { None, Finance, Alerts, Help, Settings }
+
+        sealed class Btn
+        {
+            public RectTransform Root;
+            public Image Back, Edge, Glow, Icon;
+            public Text Label;
+        }
+
+        sealed class Card
+        {
+            public RectTransform Root;
+            public Image Icon;
+            public Text Label, Value;
+            public RectTransform BarBack, BarFill;
+        }
+
+        sealed class Row
+        {
+            public RectTransform Root;
+            public Image Icon;
+            public Text Label, Value;
+        }
+
+        sealed class Objective
+        {
+            public RectTransform Root;
+            public Image Box, Check;
+            public Text Label, Value;
+        }
 
         GameController game;
         Font font;
         RectTransform safe;
-        Text money, delta, people, date, power, tax, cost, toast, info;
-        Image toastBack, infoBack;
-        RectTransform demandR, demandC, demandI;
-        readonly Dictionary<Tool, Image> toolButtons = new Dictionary<Tool, Image>();
-        readonly Image[] speedButtons = new Image[3];
-        float toastUntil, refreshAt, resetArmedUntil;
         Rect lastSafeArea;
+        float refreshAt, toastUntil, resetArmedUntil, mapRefreshAt;
+
+        // Top bar.
+        InputField cityName;
+        Text levelText, popValue, popSub, satValue, satSub, moneyValue, moneySub, powerValue, powerSub, dateText, dayText;
+        Image satIcon;
+        RectTransform levelFill;
+        readonly RectTransform[] demandFill = new RectTransform[3];
+        readonly Btn[] speedButtons = new Btn[3];
+
+        // Goals.
+        RectTransform goalsPanel;
+        Image goalsChevron;
+        bool goalsOpen = true;
+        readonly Objective[] goals = new Objective[3];
+
+        // Left column and its pop-up.
+        Image alertBadge;
+        Text alertBadgeText;
+        readonly List<string> alerts = new List<string>();
+        RectTransform popupPanel, taxRow, settingsRow;
+        Text popupTitle, popupBody, taxText;
+        Btn newCityButton;
+        Popup popup;
+
+        // Minimap.
+        Texture2D mapTexture;
+        Color32[] mapPixels;
+        RectTransform mapMarker;
+
+        // Bottom bar.
+        RectTransform bottomBar, flyout, hintPanel;
+        Text hintText;
+        Tools.Category flyoutCategory;
+        readonly List<(Tools.Category cat, Btn button)> categoryButtons = new List<(Tools.Category, Btn)>();
+        Tool currentTool;
+        string costText;
+
+        // Selected building.
+        RectTransform infoPanel, detailsBox, upkeepRow;
+        Image infoTile, infoIcon;
+        Text infoTitle, infoSubtitle, upkeepValue, demolishLabel;
+        Btn demolishButton;
+        readonly Card[] cards = new Card[4];
+        readonly Row[] rows = new Row[3];
+        Vector2Int selected = new Vector2Int(-1, -1);
+
+        // Messages.
+        RectTransform toastPanel;
+        Text toastText;
 
         public void Init(GameController g)
         {
@@ -40,117 +121,821 @@ namespace Horizonte.Presentation
             scaler.matchWidthOrHeight = 1;
 
             safe = Rect("Zona segura", canvasGo.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            BuildTopLeft();
-            BuildDemand();
-            BuildTopRight();
-            BuildToolbar();
-
-            cost = Label(Rect("Costo", safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 150), new Vector2(900, 50)), 30, TextAnchor.MiddleCenter);
-            cost.gameObject.AddComponent<Outline>().effectColor = new Color(0, 0, 0, .8f);
-
-            var toastRect = Rect("Aviso", safe, new Vector2(.5f, 1), new Vector2(.5f, 1), new Vector2(0, -200), new Vector2(760, 64));
-            toastBack = Panel(toastRect, new Color(.55f, .14f, .12f, .9f));
-            toast = Label(Rect("Texto", toastRect, Vector2.zero, Vector2.one, Vector2.zero, new Vector2(-24, 0)), 30, TextAnchor.MiddleCenter);
-            toastBack.raycastTarget = false;
-            toastBack.gameObject.SetActive(false);
-            toast.raycastTarget = false;
-
-            var infoRect = Rect("Información", safe, new Vector2(1, .5f), new Vector2(1, .5f), new Vector2(-250, 40), new Vector2(460, 300));
-            infoBack = Panel(infoRect, PanelColor);
-            info = Label(Rect("Texto", infoRect, Vector2.zero, Vector2.one, Vector2.zero, new Vector2(-40, -30)), 27, TextAnchor.UpperLeft);
-            infoBack.gameObject.SetActive(false);
+            BuildTopBar();
+            BuildGoals();
+            BuildLeftColumn();
+            BuildPopup();
+            BuildMinimap();
+            BuildBottomBar();
+            BuildInfoPanel();
+            BuildToast();
 
             SelectTool(Tool.Explore);
             SetSpeedHighlight(1);
             Refresh();
         }
 
-        // ---------------------------------------------------------------- layout
+        // ================================================================ top bar
 
-        void BuildTopLeft()
+        void BuildTopBar()
         {
-            var r = Rect("Finanzas", safe, new Vector2(0, 1), new Vector2(0, 1), new Vector2(290, -88), new Vector2(560, 160));
-            Panel(r, PanelColor);
-            money = Label(Rect("Dinero", r, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -36), new Vector2(-36, 56)), 44, TextAnchor.MiddleLeft);
-            money.fontStyle = FontStyle.Bold;
-            delta = Label(Rect("Balance", r, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -78), new Vector2(-36, 32)), 24, TextAnchor.MiddleLeft);
-            people = Label(Rect("Población", r, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -110), new Vector2(-36, 32)), 26, TextAnchor.MiddleLeft);
-            date = Label(Rect("Fecha", r, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -140), new Vector2(-36, 30)), 24, TextAnchor.MiddleLeft);
-            date.color = new Color(.8f, .85f, .9f);
-        }
+            var bar = Rect("Barra superior", safe, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -10), new Vector2(-24, 92), new Vector2(.5f, 1));
+            Panel(bar, UiKit.PanelColor, 20);
+            var layout = bar.gameObject.AddComponent<HorizontalLayoutGroup>();
+            layout.padding = new RectOffset(8, 8, 0, 0);
+            layout.childControlWidth = layout.childControlHeight = true;
+            layout.childForceExpandWidth = false;
+            layout.childForceExpandHeight = true;
 
-        void BuildDemand()
-        {
-            var r = Rect("Demanda", safe, new Vector2(0, 1), new Vector2(0, 1), new Vector2(660, -88), new Vector2(150, 160));
-            Panel(r, PanelColor);
-            Label(Rect("Título", r, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -20), new Vector2(0, 30)), 20, TextAnchor.MiddleCenter).text = "DEMANDA";
-            demandR = DemandBar(r, -40, Tools.Swatch(Tool.Residential), "R");
-            demandC = DemandBar(r, 0, Tools.Swatch(Tool.Commercial), "C");
-            demandI = DemandBar(r, 40, Tools.Swatch(Tool.Industrial), "I");
-        }
+            // City name, level and progress to the next level.
+            var city = Block(bar, "Ciudad", 282);
+            var badge = At("Escudo", city, 6, 15, 62, 62);
+            Panel(badge, UiKit.Accent, 14, UiKit.AccentEdge);
+            Icon(badge, "city", 31, 31, 40, Color.white);
+            var nameRoot = At("Nombre", city, 80, 8, 166, 38);
+            nameRoot.gameObject.AddComponent<Image>().color = Color.clear;
+            var nameText = Label(Stretch("Texto", nameRoot), 27, TextAnchor.MiddleLeft, Color.white, true);
+            nameText.raycastTarget = true;
+            nameText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            cityName = nameRoot.gameObject.AddComponent<InputField>();
+            cityName.textComponent = nameText;
+            cityName.characterLimit = 22;
+            cityName.lineType = InputField.LineType.SingleLine;
+            cityName.onEndEdit.AddListener(Rename);
+            Icon(city, "pencil", 258, 27, 24, UiKit.TextDim);
+            levelText = TextAt(city, 80, 45, 190, 22, 18, TextAnchor.MiddleLeft, UiKit.AccentText);
+            var track = At("Progreso", city, 80, 70, 182, 8);
+            Panel(track, new Color(1, 1, 1, .12f), 4, null);
+            levelFill = Rect("Relleno", track, Vector2.zero, new Vector2(.5f, 1), Vector2.zero, Vector2.zero, Vector2.zero);
+            Panel(levelFill, UiKit.AccentText, 4, null);
 
-        RectTransform DemandBar(RectTransform parent, float x, Color color, string letter)
-        {
-            // Axis in the middle of the panel; bars grow up for demand and down for surplus.
-            var axis = Rect("Eje " + letter, parent, new Vector2(.5f, .5f), new Vector2(.5f, .5f), new Vector2(x, -8), new Vector2(26, 2));
-            Panel(axis, new Color(1, 1, 1, .4f));
-            var bar = Rect("Barra " + letter, parent, new Vector2(.5f, .5f), new Vector2(.5f, .5f), new Vector2(x, -8), new Vector2(24, 0));
-            bar.pivot = new Vector2(.5f, 0);
-            Panel(bar, color);
-            Label(Rect("Letra " + letter, parent, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(x, 16), new Vector2(30, 26)), 20, TextAnchor.MiddleCenter).text = letter;
-            return bar;
-        }
+            (popValue, popSub, _) = Stat(bar, "Población", 190, "people", new Color(.75f, .86f, 1f), "Población");
+            (satValue, satSub, satIcon) = Stat(bar, "Satisfacción", 190, "smile", UiKit.Good, "Satisfacción");
+            (moneyValue, moneySub, _) = Stat(bar, "Presupuesto", 240, "coin", UiKit.Gold, "Presupuesto");
+            (powerValue, powerSub, _) = Stat(bar, "Energía", 240, "bolt", UiKit.Warn, "Energía");
 
-        void BuildTopRight()
-        {
-            var r = Rect("Controles", safe, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-280, -88), new Vector2(520, 160));
-            Panel(r, PanelColor);
-            string[] speeds = { "II", "1x", "3x" };
-            for (int i = 0; i < 3; i++)
+            // Demand: bars grow up when the city wants more of a zone and down when there is too much.
+            var demand = Block(bar, "Demanda", 140);
+            TextAt(demand, 0, 8, 140, 22, 18, TextAnchor.MiddleCenter, UiKit.TextDim).text = "Demanda";
+            string[] letters = { "R", "C", "I" };
+            Tool[] zones = { Tool.Residential, Tool.Commercial, Tool.Industrial };
+            for (int k = 0; k < 3; k++)
             {
-                int s = i;
-                speedButtons[i] = Button(r, new Vector2(.5f, 1), new Vector2(-170 + i * 92, -40), new Vector2(84, 58), speeds[i], 28, () => SetSpeed(s));
+                float cx = 32 + k * 38;
+                var t = At("Barra " + letters[k], demand, cx - 9, 32, 18, 40);
+                Panel(t, new Color(1, 1, 1, .08f), 6, null);
+                var axis = Rect("Eje", t, new Vector2(0, .5f), new Vector2(1, .5f), Vector2.zero, new Vector2(4, 2));
+                Plain(axis, new Color(1, 1, 1, .45f));
+                var fill = Rect("Relleno", t, new Vector2(.5f, .5f), new Vector2(.5f, .5f), Vector2.zero, new Vector2(12, 0), new Vector2(.5f, 0));
+                Panel(fill, Tools.Swatch(zones[k]), 4, null);
+                demandFill[k] = fill;
+                TextAt(demand, cx - 15, 72, 30, 18, 15, TextAnchor.MiddleCenter, UiKit.TextDim, true).text = letters[k];
             }
-            Button(r, new Vector2(.5f, 1), new Vector2(170, -40), new Vector2(150, 58), "Nueva", 26, NewCity);
-            tax = Label(Rect("Impuesto", r, new Vector2(.5f, 1), new Vector2(.5f, 1), new Vector2(-110, -104), new Vector2(240, 40)), 26, TextAnchor.MiddleLeft);
-            Button(r, new Vector2(.5f, 1), new Vector2(40, -104), new Vector2(60, 48), "-", 32, () => game.ChangeTax(-1));
-            Button(r, new Vector2(.5f, 1), new Vector2(108, -104), new Vector2(60, 48), "+", 32, () => game.ChangeTax(1));
-            power = Label(Rect("Energía", r, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -142), new Vector2(-40, 30)), 22, TextAnchor.MiddleLeft);
-        }
 
-        void BuildToolbar()
-        {
-            var tools = Tools.All;
-            const float w = 156, gap = 8, h = 112;
-            float total = tools.Length * w + (tools.Length - 1) * gap;
-            var bar = Rect("Herramientas", safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, h * .5f + 14), new Vector2(total + 24, h + 20));
-            Panel(bar, PanelColor);
-            for (int i = 0; i < tools.Length; i++)
+            var spacer = new GameObject("Espacio", typeof(RectTransform), typeof(LayoutElement));
+            spacer.transform.SetParent(bar, false);
+            spacer.GetComponent<LayoutElement>().flexibleWidth = 1;
+
+            var date = Block(bar, "Fecha", 150, false);
+            dateText = TextAt(date, 0, 14, 150, 24, 19, TextAnchor.MiddleCenter, UiKit.TextDim);
+            dayText = TextAt(date, 0, 40, 150, 38, 30, TextAnchor.MiddleCenter, Color.white, true);
+
+            var speed = Block(bar, "Velocidad", 180, false);
+            var pill = At("Botones", speed, 8, 15, 164, 62);
+            Panel(pill, UiKit.PanelInner, 31);
+            string[] icons = { "pause", "play", "fast" };
+            for (int k = 0; k < 3; k++)
             {
-                var tool = tools[i];
-                float x = -total * .5f + w * .5f + i * (w + gap);
-                var img = Button(bar, new Vector2(.5f, .5f), new Vector2(x, 0), new Vector2(w, h), "", 24, () => game.SelectTool(tool));
-                var rt = img.rectTransform;
-                var swatch = Rect("Color", rt, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -6), new Vector2(-20, 8));
-                Panel(swatch, Tools.Swatch(tool)).raycastTarget = false;
-                var name = Label(Rect("Nombre", rt, new Vector2(0, .5f), new Vector2(1, .5f), new Vector2(0, 8), new Vector2(-8, 50)), 23, TextAnchor.MiddleCenter);
-                name.text = Tools.Label(tool);
-                name.fontStyle = FontStyle.Bold;
-                var price = Label(Rect("Precio", rt, new Vector2(0, 0), new Vector2(1, 0), new Vector2(0, 22), new Vector2(-8, 30)), 19, TextAnchor.MiddleCenter);
-                price.text = Tools.CostLabel(tool);
-                price.color = new Color(.8f, .85f, .9f);
-                toolButtons[tool] = img;
+                int s = k;
+                speedButtons[k] = MakeButton(pill, icons[k], 6 + k * 51, 6, 50, 50, 25, icons[k], 28, null, 0, () => game.SetSpeed(s));
+                speedButtons[k].Edge.enabled = false;
+            }
+
+            var gear = Block(bar, "Ajustes", 70, false);
+            MakeButton(gear, "Ajustes", 4, 15, 62, 62, 18, "gear", 36, null, 0, () => TogglePopup(Popup.Settings));
+        }
+
+        RectTransform Block(RectTransform bar, string name, float width, bool divider = true)
+        {
+            var rt = (RectTransform)new GameObject(name, typeof(RectTransform)).transform;
+            rt.SetParent(bar, false);
+            var le = rt.gameObject.AddComponent<LayoutElement>();
+            le.preferredWidth = le.minWidth = width;
+            if (divider) Plain(Rect("Divisor", rt, new Vector2(1, .2f), new Vector2(1, .8f), Vector2.zero, new Vector2(2, 0)), UiKit.Divider);
+            return rt;
+        }
+
+        (Text value, Text sub, Image icon) Stat(RectTransform bar, string name, float width, string icon, Color iconColor, string label)
+        {
+            var b = Block(bar, name, width);
+            var img = Icon(b, icon, 36, 46, 44, iconColor);
+            var title = TextAt(b, 68, 9, width - 76, 24, 19, TextAnchor.MiddleLeft, UiKit.TextDim);
+            title.text = label;
+            title.horizontalOverflow = HorizontalWrapMode.Overflow;
+            var value = TextAt(b, 68, 31, width - 76, 34, 29, TextAnchor.MiddleLeft, Color.white, true);
+            FitOneLine(value, 16);
+            var sub = TextAt(b, 68, 64, width - 76, 22, 18, TextAnchor.MiddleLeft, UiKit.TextDim);
+            sub.horizontalOverflow = HorizontalWrapMode.Overflow;
+            return (value, sub, img);
+        }
+
+        /// <summary>Shrinks the text as needed so it stays on one line.</summary>
+        static void FitOneLine(Text t, int minSize)
+        {
+            t.resizeTextForBestFit = true;
+            t.resizeTextMinSize = minSize;
+            t.resizeTextMaxSize = t.fontSize;
+            t.verticalOverflow = VerticalWrapMode.Truncate;
+        }
+
+        void Rename(string name)
+        {
+            name = name.Trim();
+            if (name.Length == 0) name = "Horizonte";
+            game.City.Name = name;
+            cityName.text = name;
+            game.Save();
+        }
+
+        // ================================================================ goals
+
+        void BuildGoals()
+        {
+            goalsPanel = At("Objetivos", safe, 12, 114, 420, 172);
+            Panel(goalsPanel, UiKit.PanelColor, 18);
+            Icon(goalsPanel, "target", 32, 28, 32, UiKit.AccentText);
+            TextAt(goalsPanel, 58, 8, 250, 40, 25, TextAnchor.MiddleLeft, Color.white, true).text = "Objetivos";
+            var toggle = MakeButton(goalsPanel, "Plegar", 366, 6, 44, 44, 12, "chevron", 26, null, 0, ToggleGoals);
+            toggle.Back.color = Color.clear;
+            toggle.Edge.enabled = false;
+            goalsChevron = toggle.Icon;
+            for (int k = 0; k < goals.Length; k++)
+            {
+                var o = new Objective { Root = At("Objetivo " + k, goalsPanel, 0, 54 + k * 38, 420, 36) };
+                var box = At("Casilla", o.Root, 18, 5, 26, 26);
+                o.Box = Panel(box, UiKit.PanelInner, 6);
+                o.Check = Icon(box, "check", 13, 13, 22, Color.white);
+                o.Label = TextAt(o.Root, 56, 0, 236, 36, 20, TextAnchor.MiddleLeft, Color.white);
+                FitOneLine(o.Label, 15);
+                o.Value = TextAt(o.Root, 280, 0, 124, 36, 19, TextAnchor.MiddleRight, UiKit.TextDim);
+                FitOneLine(o.Value, 14);
+                goals[k] = o;
+            }
+            ApplyGoalsOpen();
+        }
+
+        void ToggleGoals()
+        {
+            goalsOpen = !goalsOpen;
+            ApplyGoalsOpen();
+        }
+
+        void ApplyGoalsOpen()
+        {
+            goalsPanel.sizeDelta = new Vector2(420, goalsOpen ? 172 : 56);
+            foreach (var o in goals) o.Root.gameObject.SetActive(goalsOpen);
+            goalsChevron.rectTransform.localEulerAngles = new Vector3(0, 0, goalsOpen ? -90 : 0);
+        }
+
+        void RefreshGoals(City c)
+        {
+            // Show the last goal met (ticked) followed by the next ones.
+            int first = Mathf.Max(0, Progress.FirstOpenGoal(c) - 1);
+            first = Mathf.Min(first, Progress.Goals.Length - goals.Length);
+            for (int k = 0; k < goals.Length; k++)
+            {
+                var goal = Progress.Goals[first + k];
+                var o = goals[k];
+                bool done = goal.Done(c);
+                o.Label.text = goal.Text;
+                o.Label.color = done ? UiKit.TextDim : Color.white;
+                o.Value.text = goal.Target == 1 ? $"{goal.Current(c)} / 1" : goal.Target >= 1000 ? $"{Short(goal.Current(c))} / {Short(goal.Target)}" : $"{goal.Current(c)} / {goal.Target}";
+                o.Box.color = done ? new Color(.2f, .68f, .32f) : UiKit.PanelInner;
+                o.Check.enabled = done;
             }
         }
 
-        // ---------------------------------------------------------------- updates
+        static string Short(long v) => v >= 10000 ? $"{v / 1000} mil" : N(v);
+
+        // ================================================================ left column and pop-up
+
+        void BuildLeftColumn()
+        {
+            var col = At("Columna", safe, 12, 298, 76, 216);
+            Panel(col, UiKit.PanelColor, 18);
+            MakeButton(col, "Finanzas", 8, 8, 60, 60, 14, "chart", 32, null, 0, () => TogglePopup(Popup.Finance)).Edge.enabled = false;
+            var alertsButton = MakeButton(col, "Avisos", 8, 78, 60, 60, 14, "warning", 32, null, 0, () => TogglePopup(Popup.Alerts));
+            alertsButton.Edge.enabled = false;
+            MakeButton(col, "Ayuda", 8, 148, 60, 60, 14, "question", 32, null, 0, () => TogglePopup(Popup.Help)).Edge.enabled = false;
+
+            var badge = At("Contador", alertsButton.Root, 40, -6, 26, 26);
+            alertBadge = badge.gameObject.AddComponent<Image>();
+            alertBadge.sprite = UiKit.Circle;
+            alertBadge.color = new Color(.96f, .55f, .16f);
+            alertBadge.raycastTarget = false;
+            alertBadgeText = Label(Stretch("Número", badge), 16, TextAnchor.MiddleCenter, Color.white, true);
+        }
+
+        void BuildPopup()
+        {
+            popupPanel = At("Ventana", safe, 100, 298, 440, 300);
+            Panel(popupPanel, UiKit.PanelColor, 18);
+            popupTitle = TextAt(popupPanel, 22, 10, 330, 42, 25, TextAnchor.MiddleLeft, Color.white, true);
+            var close = MakeButton(popupPanel, "Cerrar", 386, 8, 44, 44, 12, "close", 24, null, 0, () => TogglePopup(Popup.None));
+            close.Back.color = Color.clear;
+            close.Edge.enabled = false;
+            popupBody = TextAt(popupPanel, 22, 58, 396, 200, 20, TextAnchor.UpperLeft, Color.white);
+            popupBody.supportRichText = true;
+            popupBody.lineSpacing = 1.15f;
+
+            taxRow = At("Impuesto", popupPanel, 22, 0, 396, 56);
+            Panel(taxRow, UiKit.PanelInner, 12);
+            TextAt(taxRow, 16, 0, 160, 56, 21, TextAnchor.MiddleLeft, Color.white, true).text = "Impuesto";
+            MakeButton(taxRow, "Bajar", 200, 6, 44, 44, 10, null, 0, "−", 28, () => game.ChangeTax(-1));
+            taxText = TextAt(taxRow, 248, 0, 90, 56, 24, TextAnchor.MiddleCenter, UiKit.Gold, true);
+            MakeButton(taxRow, "Subir", 342, 6, 44, 44, 10, null, 0, "+", 28, () => game.ChangeTax(1));
+
+            settingsRow = At("Opciones", popupPanel, 22, 0, 396, 56);
+            newCityButton = MakeButton(settingsRow, "Nueva ciudad", 0, 0, 396, 56, 14, null, 0, "Empezar una ciudad nueva", 22, NewCity);
+            newCityButton.Back.color = new Color(.45f, .14f, .13f, .95f);
+            newCityButton.Edge.color = new Color(1, .5f, .45f, .6f);
+
+            popupPanel.gameObject.SetActive(false);
+        }
+
+        void TogglePopup(Popup which)
+        {
+            popup = popup == which ? Popup.None : which;
+            resetArmedUntil = 0;
+            popupPanel.gameObject.SetActive(popup != Popup.None);
+            if (popup == Popup.Settings)
+            {
+                // Settings hang under the gear on the right; the rest open beside the left column.
+                popupPanel.anchorMin = popupPanel.anchorMax = popupPanel.pivot = new Vector2(1, 1);
+                popupPanel.anchoredPosition = new Vector2(-12, -114);
+                HideInfo();
+            }
+            else
+            {
+                popupPanel.anchorMin = popupPanel.anchorMax = popupPanel.pivot = new Vector2(0, 1);
+                popupPanel.anchoredPosition = new Vector2(100, -298);
+            }
+            FillPopup();
+        }
+
+        void FillPopup()
+        {
+            if (popup == Popup.None) return;
+            var c = game.City;
+            taxRow.gameObject.SetActive(popup == Popup.Finance);
+            settingsRow.gameObject.SetActive(popup == Popup.Settings);
+            switch (popup)
+            {
+                case Popup.Finance:
+                    popupTitle.text = "Finanzas";
+                    int net = c.LastIncome - c.LastExpenses;
+                    popupBody.text = c.Day < City.DaysPerMonth
+                        ? "El primer balance llega al terminar el mes.\n\n"
+                        : $"Ingresos del mes pasado:  <b>$ {N(c.LastIncome)}</b>\nGastos del mes pasado:  <b>$ {N(c.LastExpenses)}</b>\nBalance:  <b><color={Hex(net >= 0 ? UiKit.Good : UiKit.Bad)}>{Signed(net)}</color></b>\n\n";
+                    popupBody.text += "<color=#A9BCE0>Cada mes cobras impuestos a habitantes y empleos, y pagas el mantenimiento. Subir el impuesto da más dinero pero frena el crecimiento y baja la satisfacción.</color>";
+                    taxText.text = $"{c.TaxRate} %";
+                    break;
+                case Popup.Alerts:
+                    popupTitle.text = "Avisos";
+                    popupBody.text = alerts.Count == 0 ? "Todo en orden." : "• " + string.Join("\n• ", alerts);
+                    break;
+                case Popup.Help:
+                    popupTitle.text = "Cómo se juega";
+                    popupBody.text =
+                        "Traza <b>calles</b> conectadas con la carretera y marca <b>zonas</b> a su lado. Construye una <b>central eléctrica</b>: sin calle y sin luz nada crece.\n\n" +
+                        "<color=#A9BCE0>Un dedo construye o, en Explorar, mueve el mapa. Dos dedos mueven, acercan y giran. Toca un edificio para ver sus datos.</color>";
+                    break;
+                case Popup.Settings:
+                    popupTitle.text = "Ajustes";
+                    popupBody.text = $"Horizonte {Application.version}\n<color=#A9BCE0>La partida se guarda sola cada mes y al salir.</color>";
+                    newCityButton.Label.text = Time.unscaledTime < resetArmedUntil ? "Toca otra vez para confirmar" : "Empezar una ciudad nueva";
+                    break;
+            }
+            float bodyHeight = popupBody.preferredHeight;
+            popupBody.rectTransform.sizeDelta = new Vector2(396, bodyHeight);
+            float y = 58 + bodyHeight + 14;
+            foreach (var extra in new[] { taxRow, settingsRow })
+            {
+                if (!extra.gameObject.activeSelf) continue;
+                extra.anchoredPosition = new Vector2(22, -y);
+                y += 56 + 14;
+            }
+            popupPanel.sizeDelta = new Vector2(440, y + 8);
+        }
+
+        void NewCity()
+        {
+            if (Time.unscaledTime > resetArmedUntil)
+            {
+                resetArmedUntil = Time.unscaledTime + 3;
+                FillPopup();
+                return;
+            }
+            resetArmedUntil = 0;
+            TogglePopup(Popup.None);
+            game.NewCity();
+        }
+
+        void RefreshAlerts(City c)
+        {
+            alerts.Clear();
+            int unpowered = 0, noRoad = 0, isolated = 0, consumers = 0;
+            for (int i = 0; i < c.Structure.Length; i++)
+            {
+                var s = c.Structure[i];
+                if (s == Structure.None || c.Anchor[i] != i) continue;
+                if (s == Structure.Road)
+                {
+                    if (!c.RoadConnected[i]) isolated++;
+                    continue;
+                }
+                if (!c.RoadAccess[i]) noRoad++;
+                if (s == Structure.PowerPlant) continue;
+                consumers++;
+                if (!c.Powered[i]) unpowered++;
+            }
+            if (c.PowerSupply == 0 && consumers > 0) alerts.Add("No hay centrales eléctricas: sin luz nada crece.");
+            else if (c.PowerDemand > c.PowerSupply) alerts.Add($"La energía no alcanza: faltan {N(c.PowerDemand - c.PowerSupply)} MW.");
+            if (unpowered > 0 && c.PowerSupply > 0) alerts.Add($"{N(unpowered)} {(unpowered == 1 ? "lote o edificio" : "lotes o edificios")} sin electricidad.");
+            if (noRoad > 0) alerts.Add($"{N(noRoad)} {(noRoad == 1 ? "lote" : "lotes")} sin calle conectada cerca.");
+            if (isolated > 0) alerts.Add($"{N(isolated)} {(isolated == 1 ? "tramo" : "tramos")} de calle sin salida a la carretera.");
+            if (c.Money < 0) alerts.Add("La tesorería está en números rojos.");
+            else if (c.Day >= City.DaysPerMonth && c.LastIncome < c.LastExpenses) alerts.Add("Gastas más de lo que ingresas cada mes.");
+            if (c.TaxRate >= 13) alerts.Add("Los impuestos altos espantan a la gente.");
+            alertBadge.gameObject.SetActive(alerts.Count > 0);
+            alertBadgeText.text = alerts.Count.ToString();
+        }
+
+        // ================================================================ minimap
+
+        void BuildMinimap()
+        {
+            var panel = Rect("Minimapa", safe, Vector2.zero, Vector2.zero, new Vector2(12, 12), new Vector2(236, 236), Vector2.zero);
+            Panel(panel, UiKit.PanelColor, 18);
+            var maskRt = Stretch("Máscara", panel, 8, 8, 8, 8);
+            var maskImage = maskRt.gameObject.AddComponent<Image>();
+            maskImage.sprite = UiKit.Rounded;
+            maskImage.type = Image.Type.Sliced;
+            maskImage.pixelsPerUnitMultiplier = 24f / 12;
+            maskRt.gameObject.AddComponent<Mask>().showMaskGraphic = false;
+
+            var w = game.City.Width;
+            var h = game.City.Height;
+            mapTexture = new Texture2D(w, h, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = "Minimapa" };
+            mapPixels = new Color32[w * h];
+            var raw = Stretch("Mapa", maskRt).gameObject.AddComponent<RawImage>();
+            raw.texture = mapTexture;
+            var touch = raw.gameObject.AddComponent<TouchArea>();
+            touch.OnTouch = p => game.Rig.Focus = new Vector3(p.x * game.City.Width, 0, p.y * game.City.Height) * CityView.TileSize;
+
+            mapMarker = Rect("Cámara", raw.rectTransform, Vector2.zero, Vector2.zero, Vector2.zero, new Vector2(26, 26));
+            var marker = mapMarker.gameObject.AddComponent<Image>();
+            marker.sprite = Icons.Get("play");
+            marker.raycastTarget = false;
+            mapMarker.gameObject.AddComponent<Outline>().effectColor = new Color(0, 0, 0, .7f);
+
+            var north = TextAt(panel, 16, 12, 30, 26, 20, TextAnchor.MiddleCenter, Color.white, true);
+            north.text = "N";
+            north.gameObject.AddComponent<Outline>().effectColor = new Color(0, 0, 0, .7f);
+        }
+
+        void RefreshMinimap()
+        {
+            var c = game.City;
+            if (mapTexture.width != c.Width || mapTexture.height != c.Height)
+            {
+                mapTexture.Reinitialize(c.Width, c.Height);
+                mapPixels = new Color32[c.Width * c.Height];
+            }
+            Color grass = new Color(.4f, .55f, .29f), forest = new Color(.22f, .38f, .18f), water = new Color(.2f, .44f, .66f);
+            for (int i = 0; i < mapPixels.Length; i++)
+            {
+                var s = c.Structure[i];
+                Color col;
+                if (s == Structure.None) col = c.Terrain[i] == Terrain.Water ? water : c.Terrain[i] == Terrain.Forest ? forest : grass;
+                else if (s == Structure.Road) col = new Color(.86f, .87f, .9f);
+                else
+                {
+                    col = Tools.Swatch(ToolOf(s));
+                    if (Catalog.Get(s).IsZone && c.Level[c.Anchor[i]] == 0) col = Color.Lerp(col, grass, .55f);
+                }
+                mapPixels[i] = col;
+            }
+            mapTexture.SetPixels32(mapPixels);
+            mapTexture.Apply(false);
+        }
+
+        void UpdateMapMarker()
+        {
+            var c = game.City;
+            var f = game.Rig.Focus / CityView.TileSize;
+            mapMarker.anchorMin = mapMarker.anchorMax = new Vector2(f.x / c.Width, f.z / c.Height);
+            mapMarker.anchoredPosition = Vector2.zero;
+            // The icon points right; the camera looks north (up on the map) at yaw 0 and turns clockwise.
+            mapMarker.localEulerAngles = new Vector3(0, 0, 90 - game.Rig.Yaw);
+        }
+
+        // ================================================================ bottom bar
+
+        void BuildBottomBar()
+        {
+            var cats = Tools.Categories;
+            const float w = 124, h = 94, gap = 6;
+            float width = cats.Length * w + (cats.Length - 1) * gap + 12;
+            bottomBar = Rect("Construcción", safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 12), new Vector2(width, h + 12), new Vector2(.5f, 0));
+            Panel(bottomBar, UiKit.PanelColor, 20);
+            for (int k = 0; k < cats.Length; k++)
+            {
+                var cat = cats[k];
+                var b = MakeButton(bottomBar, cat.Name, 6 + k * (w + gap), 6, w, h, 16, cat.Icon, 44, cat.Name, 21, () => PickCategory(cat), true);
+                categoryButtons.Add((cat, b));
+            }
+
+            hintPanel = Rect("Indicación", safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 132), new Vector2(600, 50), new Vector2(.5f, 0));
+            Panel(hintPanel, UiKit.PanelColor, 25);
+            hintText = Label(Stretch("Texto", hintPanel, 24, 0, 24, 0), 21, TextAnchor.MiddleCenter, Color.white);
+            hintText.supportRichText = true;
+        }
+
+        void PickCategory(Tools.Category cat)
+        {
+            if (cat.Tools.Length == 1)
+            {
+                CloseFlyout();
+                game.SelectTool(cat.Tools[0]);
+                return;
+            }
+            if (flyoutCategory == cat)
+            {
+                CloseFlyout();
+                HighlightCategories();
+                return;
+            }
+            OpenFlyout(cat);
+        }
+
+        void OpenFlyout(Tools.Category cat)
+        {
+            CloseFlyout();
+            HideInfo();
+            flyoutCategory = cat;
+            int index = Array.IndexOf(Tools.Categories, cat);
+            var button = categoryButtons[index].button.Root;
+            float centre = button.anchoredPosition.x + button.sizeDelta.x * .5f - bottomBar.sizeDelta.x * .5f;
+            const float cw = 200, ch = 140;
+            flyout = Rect("Menú " + cat.Name, safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(centre, 128), new Vector2(cat.Tools.Length * (cw + 8) + 8, ch + 16), new Vector2(.5f, 0));
+            Panel(flyout, UiKit.PanelColor, 18);
+            for (int k = 0; k < cat.Tools.Length; k++)
+            {
+                var tool = cat.Tools[k];
+                var b = MakeButton(flyout, Tools.Label(tool), 8 + k * (cw + 8), 8, cw, ch, 14, Tools.Icon(tool), 50, null, 0, () =>
+                {
+                    CloseFlyout();
+                    game.SelectTool(tool);
+                }, true);
+                b.Icon.rectTransform.anchoredPosition = new Vector2(cw * .5f, -40);
+                b.Icon.color = Tools.Swatch(tool) * 1.3f;
+                TextAt(b.Root, 0, 74, cw, 28, 21, TextAnchor.MiddleCenter, Color.white, true).text = Tools.Label(tool);
+                TextAt(b.Root, 0, 102, cw, 26, 19, TextAnchor.MiddleCenter, UiKit.Gold, true).text = Tools.CostLabel(tool);
+                b.Glow.gameObject.SetActive(tool == currentTool);
+                if (tool == currentTool) b.Back.color = UiKit.Accent;
+            }
+            HighlightCategories();
+            UpdateHint();
+        }
+
+        void CloseFlyout()
+        {
+            if (flyout != null) Destroy(flyout.gameObject);
+            flyout = null;
+            flyoutCategory = null;
+            UpdateHint();
+        }
+
+        public void SelectTool(Tool t)
+        {
+            currentTool = t;
+            HighlightCategories();
+            HideInfo();
+            UpdateHint();
+        }
+
+        void HighlightCategories()
+        {
+            foreach (var (cat, b) in categoryButtons)
+            {
+                bool on = flyoutCategory != null ? flyoutCategory == cat : Array.IndexOf(cat.Tools, currentTool) >= 0;
+                b.Back.color = on ? UiKit.Accent : Color.clear;
+                b.Edge.color = on ? UiKit.AccentEdge : Color.clear;
+                b.Glow.gameObject.SetActive(on);
+                b.Label.color = on ? Color.white : new Color(.86f, .91f, 1f);
+            }
+        }
+
+        public void ShowCost(string text)
+        {
+            costText = text;
+            UpdateHint();
+        }
+
+        void UpdateHint()
+        {
+            if (hintPanel == null) return;
+            string text = costText ?? Tools.Hint(currentTool);
+            bool show = !string.IsNullOrEmpty(text) && flyout == null;
+            hintPanel.gameObject.SetActive(show);
+            if (!show) return;
+            hintText.text = text;
+            hintPanel.sizeDelta = new Vector2(hintText.preferredWidth + 56, 50);
+        }
+
+        // ================================================================ selected building
+
+        void BuildInfoPanel()
+        {
+            infoPanel = Rect("Información", safe, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-12, -114), new Vector2(430, 600), new Vector2(1, 1));
+            Panel(infoPanel, UiKit.PanelColor, 20);
+
+            var tile = At("Ícono", infoPanel, 14, 14, 88, 88);
+            infoTile = Panel(tile, Color.white, 16, new Color(1, 1, 1, .35f));
+            infoIcon = Icon(tile, "house", 44, 44, 56, Color.white);
+            infoIcon.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, .35f);
+            infoTitle = TextAt(infoPanel, 116, 18, 254, 40, 29, TextAnchor.MiddleLeft, Color.white, true);
+            FitOneLine(infoTitle, 18);
+            infoSubtitle = TextAt(infoPanel, 116, 58, 300, 28, 20, TextAnchor.MiddleLeft, UiKit.AccentText);
+            var close = MakeButton(infoPanel, "Cerrar", 374, 10, 46, 46, 12, "close", 24, null, 0, () => game.Inspect(-1, -1));
+            close.Back.color = Color.clear;
+            close.Edge.enabled = false;
+            Plain(At("Divisor", infoPanel, 14, 114, 402, 2), UiKit.Divider);
+
+            for (int k = 0; k < cards.Length; k++)
+            {
+                var card = new Card { Root = At("Dato " + k, infoPanel, 14 + k % 2 * 207, 126 + k / 2 * 94, 195, 84) };
+                Panel(card.Root, UiKit.PanelInner, 12);
+                card.Icon = Icon(card.Root, "people", 32, 42, 36, Color.white);
+                card.Label = TextAt(card.Root, 60, 10, 130, 24, 18, TextAnchor.MiddleLeft, UiKit.TextDim);
+                card.Value = TextAt(card.Root, 60, 33, 130, 32, 25, TextAnchor.MiddleLeft, Color.white, true);
+                FitOneLine(card.Value, 15);
+                card.BarBack = At("Barra", card.Root, 60, 68, 118, 7);
+                Panel(card.BarBack, new Color(1, 1, 1, .12f), 4, null);
+                card.BarFill = Rect("Relleno", card.BarBack, Vector2.zero, new Vector2(.5f, 1), Vector2.zero, Vector2.zero, Vector2.zero);
+                Panel(card.BarFill, UiKit.Good, 4, null);
+                cards[k] = card;
+            }
+
+            detailsBox = At("Detalles", infoPanel, 14, 0, 402, 150);
+            Panel(detailsBox, UiKit.PanelInner, 12);
+            TextAt(detailsBox, 16, 6, 300, 32, 21, TextAnchor.MiddleLeft, Color.white, true).text = "Detalles";
+            for (int k = 0; k < rows.Length; k++)
+            {
+                var row = new Row { Root = At("Fila " + k, detailsBox, 0, 42 + k * 34, 402, 32) };
+                row.Icon = Icon(row.Root, "bolt", 28, 16, 24, UiKit.Warn);
+                row.Label = TextAt(row.Root, 50, 0, 220, 32, 20, TextAnchor.MiddleLeft, Color.white);
+                row.Value = TextAt(row.Root, 220, 0, 166, 32, 20, TextAnchor.MiddleRight, Color.white, true);
+                rows[k] = row;
+            }
+
+            upkeepRow = At("Mantenimiento", infoPanel, 14, 0, 402, 46);
+            Panel(upkeepRow, UiKit.PanelInner, 12);
+            Icon(upkeepRow, "coin", 28, 23, 26, UiKit.Gold);
+            TextAt(upkeepRow, 50, 0, 200, 46, 20, TextAnchor.MiddleLeft, Color.white).text = "Mantenimiento";
+            upkeepValue = TextAt(upkeepRow, 200, 0, 186, 46, 20, TextAnchor.MiddleRight, Color.white, true);
+
+            demolishButton = MakeButton(infoPanel, "Demoler", 14, 0, 402, 54, 14, "bulldoze", 30, null, 0, () => game.Demolish(selected.x, selected.y));
+            demolishButton.Back.color = new Color(.45f, .14f, .13f, .95f);
+            demolishButton.Edge.color = new Color(1, .5f, .45f, .6f);
+            demolishButton.Icon.rectTransform.anchoredPosition = new Vector2(120, -27);
+            demolishLabel = TextAt(demolishButton.Root, 145, 0, 230, 54, 22, TextAnchor.MiddleLeft, Color.white, true);
+
+            infoPanel.gameObject.SetActive(false);
+        }
+
+        /// <summary>Shows the panel for whatever is on a tile, or hides it when the tile is off the map.</summary>
+        public void Select(int x, int y)
+        {
+            var c = game.City;
+            if (!c.InBounds(x, y))
+            {
+                HideInfo();
+                return;
+            }
+            if (popup == Popup.Settings) TogglePopup(Popup.None);
+            CloseFlyout();
+            HighlightCategories();
+            selected = new Vector2Int(x, y);
+            infoPanel.gameObject.SetActive(true);
+            RefreshInfo();
+        }
+
+        public void HideInfo()
+        {
+            selected = new Vector2Int(-1, -1);
+            if (infoPanel != null) infoPanel.gameObject.SetActive(false);
+            if (game != null && game.View != null) game.View.ClearSelection();
+        }
+
+        void RefreshInfo()
+        {
+            var c = game.City;
+            if (selected.x < 0) return;
+            int i = c.Index(selected.x, selected.y);
+            var s = c.Structure[i];
+            foreach (var card in cards) card.Root.gameObject.SetActive(false);
+            foreach (var row in rows) row.Root.gameObject.SetActive(false);
+            int nCards = 0, nRows = 0;
+            void AddCard(string icon, Color iconColor, string label, string value, Color valueColor, float bar = -1)
+            {
+                var card = cards[nCards++];
+                card.Root.gameObject.SetActive(true);
+                card.Icon.sprite = Icons.Get(icon);
+                card.Icon.color = iconColor;
+                card.Label.text = label;
+                card.Value.text = value;
+                card.Value.color = valueColor;
+                card.BarBack.gameObject.SetActive(bar >= 0);
+                if (bar >= 0) card.BarFill.anchorMax = new Vector2(Mathf.Clamp01(bar), 1);
+            }
+            void AddRow(string icon, Color iconColor, string label, string value, Color valueColor)
+            {
+                var row = rows[nRows++];
+                row.Root.gameObject.SetActive(true);
+                row.Icon.sprite = Icons.Get(icon);
+                row.Icon.color = iconColor;
+                row.Label.text = label;
+                row.Value.text = value;
+                row.Value.color = valueColor;
+            }
+            (string, Color) YesNo(bool v) => v ? ("Sí", UiKit.Good) : ("No", UiKit.Bad);
+            var blue = new Color(.6f, .8f, 1f);
+            int desire = c.Desirability[i];
+            Color desireColor = desire > 0 ? UiKit.Good : desire < 0 ? UiKit.Bad : Color.white;
+            int upkeep = 0;
+            string demolish = null;
+
+            if (s == Structure.None)
+            {
+                var t = c.Terrain[i];
+                infoTitle.text = t == Terrain.Water ? "Río" : t == Terrain.Forest ? "Bosque" : "Terreno libre";
+                infoSubtitle.text = t == Terrain.Water ? "No se puede construir" : "Terreno";
+                infoTile.color = t == Terrain.Water ? new Color(.2f, .48f, .72f) : t == Terrain.Forest ? new Color(.22f, .45f, .22f) : new Color(.45f, .62f, .32f);
+                infoIcon.sprite = Icons.Get(t == Terrain.Water ? "water" : t == Terrain.Forest ? "forest" : "explore");
+                AddCard("star", UiKit.Gold, "Atractivo", Signed(desire), desireColor);
+                var (access, accessColor) = YesNo(c.RoadAccess[i]);
+                if (t != Terrain.Water) AddCard("road", blue, "Calle cercana", access, accessColor);
+                if (t == Terrain.Forest) demolish = $"Talar  ·  $ {Catalog.ClearForestCost}";
+                game.View.ClearSelection();
+            }
+            else
+            {
+                var def = Catalog.Get(s);
+                int a = c.Anchor[i] >= 0 ? c.Anchor[i] : i;
+                int level = c.Level[a];
+                var tool = ToolOf(s);
+                infoTile.color = Tools.Swatch(tool);
+                infoIcon.sprite = Icons.Get(Tools.Icon(tool));
+                infoTitle.text = def.IsZone ? ZoneTitle(s, level) : def.Name;
+                infoSubtitle.text = Subtitle(s, level);
+                upkeep = def.Upkeep;
+                demolish = $"Demoler  ·  $ {Catalog.BulldozeCost}";
+                var (power, powerColor) = YesNo(c.Powered[i]);
+                var (access, accessColor) = YesNo(c.RoadAccess[i]);
+                if (def.IsZone)
+                {
+                    bool homes = s == Structure.Residential;
+                    AddCard("level", blue, "Nivel", $"{level} / {Catalog.MaxLevel}", Color.white, level / (float)Catalog.MaxLevel);
+                    AddCard(homes ? "people" : "briefcase", blue, homes ? "Habitantes" : "Empleos", N(Catalog.Capacity(s, level)), Color.white);
+                    AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
+                    AddCard("road", blue, "Calle cercana", access, accessColor);
+                    AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{Catalog.PowerUse(s, level)} MW", Color.white);
+                    AddRow("star", UiKit.Gold, "Atractivo del lugar", Signed(desire), desireColor);
+                    int d = Mathf.RoundToInt(c.Demand(s) * 100);
+                    AddRow("chart", blue, "Demanda de la zona", $"{(d > 0 ? "+" : "")}{d} %", d > 0 ? UiKit.Good : d < 0 ? UiKit.Bad : Color.white);
+                }
+                else if (s == Structure.Road)
+                {
+                    bool connected = c.RoadConnected[i];
+                    AddCard("road", blue, "Conexión", connected ? "Con salida" : "Aislada", connected ? UiKit.Good : UiKit.Bad);
+                    AddCard("star", UiKit.Gold, "Atractivo", Signed(desire), desireColor);
+                }
+                else if (s == Structure.PowerPlant)
+                {
+                    float use = c.PowerSupply > 0 ? c.PowerDemand / (float)c.PowerSupply : 0;
+                    AddCard("bolt", UiKit.Warn, "Producción", $"{def.PowerSupply} MW", Color.white);
+                    AddCard("chart", blue, "Uso de la red", $"{Mathf.RoundToInt(use * 100)} %", use > 1 ? UiKit.Bad : Color.white, use);
+                    AddCard("road", blue, "Calle cercana", access, accessColor);
+                    AddCard("radius", blue, "Contamina", $"{def.Radius} casillas", Color.white);
+                    AddRow("bolt", UiKit.Warn, "Consumo de la ciudad", $"{N(c.PowerDemand)} MW", Color.white);
+                    AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), UiKit.Bad);
+                }
+                else
+                {
+                    AddCard("radius", blue, "Alcance", $"{def.Radius} casillas", Color.white);
+                    AddCard("star", UiKit.Gold, "Atractivo", Signed(def.Desirability), UiKit.Good);
+                    AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
+                    AddCard("road", blue, "Calle cercana", access, accessColor);
+                    AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{Catalog.PowerUse(s, level)} MW", Color.white);
+                    AddRow("star", UiKit.Gold, "Atractivo del lugar", Signed(desire), desireColor);
+                }
+                game.View.SetSelection(a % c.Width, a / c.Width, def.Width, def.Height);
+            }
+
+            // Stack the sections that are in use.
+            float y = 126 + (nCards + 1) / 2 * 94;
+            detailsBox.gameObject.SetActive(nRows > 0);
+            if (nRows > 0)
+            {
+                detailsBox.anchoredPosition = new Vector2(14, -y);
+                detailsBox.sizeDelta = new Vector2(402, 46 + nRows * 34);
+                y += 46 + nRows * 34 + 12;
+            }
+            upkeepRow.gameObject.SetActive(upkeep > 0);
+            if (upkeep > 0)
+            {
+                upkeepRow.anchoredPosition = new Vector2(14, -y);
+                upkeepValue.text = s == Structure.Road ? $"$ {upkeep} /mes por casilla" : $"$ {N(upkeep)} /mes";
+                y += 46 + 12;
+            }
+            demolishButton.Root.gameObject.SetActive(demolish != null);
+            if (demolish != null)
+            {
+                demolishButton.Root.anchoredPosition = new Vector2(14, -y);
+                demolishLabel.text = demolish;
+                y += 54 + 12;
+            }
+            infoPanel.sizeDelta = new Vector2(430, y + 2);
+        }
+
+        static string ZoneTitle(Structure s, int level)
+        {
+            if (level == 0) return s == Structure.Residential ? "Lote residencial" : s == Structure.Commercial ? "Lote comercial" : "Lote industrial";
+            string[] names = s == Structure.Residential ? new[] { "Casas", "Departamentos", "Torre residencial" }
+                : s == Structure.Commercial ? new[] { "Tienda", "Oficinas", "Torre de oficinas" }
+                : new[] { "Taller", "Fábrica", "Planta industrial" };
+            return names[Mathf.Clamp(level, 1, 3) - 1];
+        }
+
+        static string Subtitle(Structure s, int level)
+        {
+            switch (s)
+            {
+                case Structure.Residential: return level == 0 ? "Vivienda  ·  esperando quien construya" : "Vivienda";
+                case Structure.Commercial: return level == 0 ? "Comercio  ·  esperando quien construya" : "Comercio";
+                case Structure.Industrial: return level == 0 ? "Industria  ·  esperando quien construya" : "Industria";
+                case Structure.Road: return "Infraestructura";
+                case Structure.PowerPlant: return "Energía  ·  servicio público";
+                case Structure.Park: return "Recreación";
+                case Structure.Police: return "Seguridad  ·  servicio público";
+                case Structure.School: return "Educación  ·  servicio público";
+                default: return "";
+            }
+        }
+
+        static Tool ToolOf(Structure s)
+        {
+            foreach (var t in Tools.All) if (Tools.ToStructure(t) == s) return t;
+            return Tool.Explore;
+        }
+
+        // ================================================================ messages
+
+        void BuildToast()
+        {
+            toastPanel = Rect("Aviso", safe, new Vector2(.5f, 1), new Vector2(.5f, 1), new Vector2(0, -114), new Vector2(600, 56), new Vector2(.5f, 1));
+            Panel(toastPanel, new Color(.36f, .09f, .09f, .94f), 18, new Color(1, .5f, .45f, .6f));
+            Icon(toastPanel, "warning", 34, 28, 30, UiKit.Warn);
+            toastText = TextAt(toastPanel, 60, 0, 520, 56, 22, TextAnchor.MiddleLeft, Color.white, true);
+            toastText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            foreach (var g in toastPanel.GetComponentsInChildren<Graphic>()) g.raycastTarget = false;
+            toastPanel.gameObject.SetActive(false);
+        }
+
+        public void Toast(string text)
+        {
+            toastText.text = text;
+            toastPanel.sizeDelta = new Vector2(toastText.preferredWidth + 88, 56);
+            toastPanel.gameObject.SetActive(true);
+            toastUntil = Time.unscaledTime + 2.5f;
+        }
+
+        // ================================================================ updates
 
         void Update()
         {
             if (game == null) return;
             if (Screen.safeArea != lastSafeArea) ApplySafeArea();
             if (Time.unscaledTime >= refreshAt) Refresh();
-            if (toastBack.gameObject.activeSelf && Time.unscaledTime > toastUntil) toastBack.gameObject.SetActive(false);
+            if (toastPanel.gameObject.activeSelf && Time.unscaledTime > toastUntil) toastPanel.gameObject.SetActive(false);
+            if (popup == Popup.Settings && resetArmedUntil > 0 && Time.unscaledTime > resetArmedUntil)
+            {
+                resetArmedUntil = 0;
+                FillPopup();
+            }
+            UpdateMapMarker();
         }
 
         void ApplySafeArea()
@@ -167,134 +952,238 @@ namespace Horizonte.Presentation
             refreshAt = Time.unscaledTime + .25f;
             var c = game.City;
             if (c == null) return;
-            money.text = $"$ {c.Money:N0}";
-            money.color = c.Money < 0 ? new Color(1, .45f, .4f) : Color.white;
+
+            if (!cityName.isFocused && cityName.text != c.Name) cityName.text = c.Name;
+            levelText.text = $"Nivel de ciudad {Progress.Level(c.Population)}";
+            levelFill.anchorMax = new Vector2(Mathf.Max(.02f, Progress.LevelProgress(c.Population)), 1);
+
+            popValue.text = N(c.Population);
+            popSub.text = $"Empleos {N(c.Jobs)}";
+
+            if (c.Population == 0)
+            {
+                satValue.text = "—";
+                satSub.text = "Sin habitantes";
+                satSub.color = UiKit.TextDim;
+                satIcon.color = UiKit.TextDim;
+            }
+            else
+            {
+                var mood = c.Satisfaction >= 70 ? UiKit.Good : c.Satisfaction >= 45 ? UiKit.Warn : UiKit.Bad;
+                satValue.text = $"{c.Satisfaction} %";
+                satSub.text = c.Satisfaction >= 70 ? "Alta" : c.Satisfaction >= 45 ? "Media" : "Baja";
+                satSub.color = mood;
+                satIcon.color = mood;
+            }
+
+            moneyValue.text = $"$ {N(c.Money)}";
+            moneyValue.color = c.Money < 0 ? UiKit.Bad : Color.white;
             int net = c.LastIncome - c.LastExpenses;
-            delta.text = c.Day < City.DaysPerMonth ? "Primer mes en curso" : $"{(net >= 0 ? "+" : "")}{net:N0} al mes  ·  ingresos {c.LastIncome:N0}  ·  gastos {c.LastExpenses:N0}";
-            delta.color = net >= 0 ? new Color(.6f, .92f, .6f) : new Color(1, .6f, .5f);
-            people.text = $"Habitantes {c.Population:N0}   ·   Empleos {c.Jobs:N0}";
-            date.text = $"{c.Day % City.DaysPerMonth + 1} {MonthNames[c.Month]} · Año {c.Year}";
-            tax.text = $"Impuesto {c.TaxRate}%";
-            power.text = c.PowerSupply == 0 ? "Energía: sin centrales" : $"Energía {c.PowerDemand:N0} / {c.PowerSupply:N0}";
-            power.color = c.PowerDemand > c.PowerSupply ? new Color(1, .6f, .45f) : new Color(.8f, .85f, .9f);
-            SetBar(demandR, c.DemandResidential);
-            SetBar(demandC, c.DemandCommercial);
-            SetBar(demandI, c.DemandIndustrial);
+            if (c.Day < City.DaysPerMonth)
+            {
+                moneySub.text = "Primer mes";
+                moneySub.color = UiKit.TextDim;
+            }
+            else
+            {
+                moneySub.text = $"{Signed(net)} /mes";
+                moneySub.color = net >= 0 ? UiKit.Good : UiKit.Bad;
+            }
+
+            if (c.PowerSupply == 0)
+            {
+                powerValue.text = "0 MW";
+                powerSub.text = "Sin centrales";
+                powerSub.color = UiKit.Bad;
+            }
+            else
+            {
+                float use = c.PowerDemand / (float)c.PowerSupply;
+                powerValue.text = $"{N(c.PowerDemand)} / {N(c.PowerSupply)} MW";
+                powerSub.text = use > 1 ? "No alcanza" : $"Uso {Mathf.RoundToInt(use * 100)} %";
+                powerSub.color = use > 1 ? UiKit.Bad : use > .85f ? UiKit.Warn : UiKit.Good;
+            }
+
+            SetDemand(0, c.DemandResidential);
+            SetDemand(1, c.DemandCommercial);
+            SetDemand(2, c.DemandIndustrial);
+
+            dateText.text = $"{c.Day % City.DaysPerMonth + 1} {MonthNames[c.Month]}  ·  Año {c.Year}";
+            dayText.text = $"Día {N(c.Day + 1)}";
+
+            RefreshGoals(c);
+            RefreshAlerts(c);
+            if (popup != Popup.None) FillPopup();
+            if (selected.x >= 0) RefreshInfo();
+            if (Time.unscaledTime >= mapRefreshAt)
+            {
+                mapRefreshAt = Time.unscaledTime + 1;
+                RefreshMinimap();
+            }
         }
 
-        static void SetBar(RectTransform bar, float demand)
+        void SetDemand(int k, float demand)
         {
-            const float max = 52;
-            float h = Mathf.Abs(demand) * max;
-            bar.sizeDelta = new Vector2(24, Mathf.Max(2, h));
+            var bar = demandFill[k];
+            bar.sizeDelta = new Vector2(12, Mathf.Max(2, Mathf.Abs(demand) * 19));
             bar.localScale = new Vector3(1, demand >= 0 ? 1 : -1, 1);
-        }
-
-        public void SelectTool(Tool t)
-        {
-            foreach (var kv in toolButtons) kv.Value.color = kv.Key == t ? SelectedColor : ButtonColor;
-            foreach (var kv in toolButtons)
-                foreach (var text in kv.Value.GetComponentsInChildren<Text>()) text.color = kv.Key == t ? new Color(.1f, .1f, .12f) : (text.name == "Precio" ? new Color(.8f, .85f, .9f) : Color.white);
-            HideInfo();
-        }
-
-        void SetSpeed(int s)
-        {
-            game.SetSpeed(s);
-            SetSpeedHighlight(s);
         }
 
         public void SetSpeedHighlight(int s)
         {
-            for (int i = 0; i < speedButtons.Length; i++) speedButtons[i].color = i == s ? SelectedColor : ButtonColor;
-        }
-
-        void NewCity()
-        {
-            if (Time.unscaledTime > resetArmedUntil)
+            for (int i = 0; i < speedButtons.Length; i++)
             {
-                resetArmedUntil = Time.unscaledTime + 3;
-                Toast("Toca \"Nueva\" otra vez para empezar una ciudad nueva");
-                return;
+                speedButtons[i].Back.color = i == s ? UiKit.Accent : Color.clear;
+                speedButtons[i].Icon.color = i == s ? Color.white : UiKit.TextDim;
             }
-            resetArmedUntil = 0;
-            game.NewCity();
         }
 
-        public void ShowCost(string text)
+        /// <summary>Opens a pop-up or the building menu of a category; used by the screenshot mode.</summary>
+        public void Showcase(string what)
         {
-            cost.text = text ?? "";
+            if (what == "finanzas") TogglePopup(Popup.Finance);
+            foreach (var cat in Tools.Categories) if (cat.Name == what) PickCategory(cat);
         }
 
-        public void Toast(string text)
-        {
-            toast.text = text;
-            toastBack.gameObject.SetActive(true);
-            toastUntil = Time.unscaledTime + 2.5f;
-        }
+        static string Signed(int v) => v > 0 ? $"+{N(v)}" : v < 0 ? $"−{N(-v)}" : "0";
 
-        public void ShowInfo(string text)
-        {
-            info.text = text;
-            infoBack.gameObject.SetActive(true);
-        }
+        static string Hex(Color c) => "#" + ColorUtility.ToHtmlStringRGB(c);
 
-        public void HideInfo()
-        {
-            if (infoBack != null) infoBack.gameObject.SetActive(false);
-        }
+        // ================================================================ widgets
 
-        // ---------------------------------------------------------------- widgets
-
-        static RectTransform Rect(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 pos, Vector2 size)
+        static RectTransform Rect(string name, Transform parent, Vector2 anchorMin, Vector2 anchorMax, Vector2 pos, Vector2 size, Vector2? pivot = null)
         {
             var go = new GameObject(name, typeof(RectTransform));
             var rt = (RectTransform)go.transform;
             rt.SetParent(parent, false);
             rt.anchorMin = anchorMin;
             rt.anchorMax = anchorMax;
+            rt.pivot = pivot ?? new Vector2(.5f, .5f);
             rt.anchoredPosition = pos;
             rt.sizeDelta = size;
             return rt;
         }
 
-        static Image Panel(RectTransform rt, Color color)
+        /// <summary>Box placed from the parent's top-left corner, measured downwards.</summary>
+        static RectTransform At(string name, Transform parent, float x, float y, float w, float h) =>
+            Rect(name, parent, new Vector2(0, 1), new Vector2(0, 1), new Vector2(x, -y), new Vector2(w, h), new Vector2(0, 1));
+
+        static RectTransform Stretch(string name, Transform parent, float left = 0, float top = 0, float right = 0, float bottom = 0)
+        {
+            var rt = Rect(name, parent, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            rt.offsetMin = new Vector2(left, bottom);
+            rt.offsetMax = new Vector2(-right, -top);
+            return rt;
+        }
+
+        static Image Plain(RectTransform rt, Color color)
         {
             var img = rt.gameObject.AddComponent<Image>();
             img.color = color;
+            img.raycastTarget = false;
             return img;
         }
 
-        Text Label(RectTransform rt, int size, TextAnchor anchor)
+        /// <summary>Rounded panel with the usual light border. Radius is in canvas units.</summary>
+        static Image Panel(RectTransform rt, Color color, float radius) => Panel(rt, color, radius, UiKit.EdgeColor);
+
+        /// <summary>Rounded panel with a border of the given colour, or none when it is null.</summary>
+        static Image Panel(RectTransform rt, Color color, float radius, Color? edge)
+        {
+            var img = rt.gameObject.AddComponent<Image>();
+            img.sprite = UiKit.Rounded;
+            img.type = Image.Type.Sliced;
+            img.pixelsPerUnitMultiplier = 24f / radius;
+            img.color = color;
+            if (edge.HasValue)
+            {
+                var border = Stretch("Borde", rt).gameObject.AddComponent<Image>();
+                border.sprite = UiKit.Outline;
+                border.type = Image.Type.Sliced;
+                border.pixelsPerUnitMultiplier = 24f / radius;
+                border.color = edge.Value;
+                border.raycastTarget = false;
+                border.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
+            }
+            return img;
+        }
+
+        Image Icon(RectTransform parent, string icon, float cx, float cy, float size, Color color)
+        {
+            var rt = Rect("Ícono " + icon, parent, new Vector2(0, 1), new Vector2(0, 1), new Vector2(cx, -cy), new Vector2(size, size));
+            var img = rt.gameObject.AddComponent<Image>();
+            img.sprite = Icons.Get(icon);
+            img.color = color;
+            img.raycastTarget = false;
+            return img;
+        }
+
+        Text Label(RectTransform rt, int size, TextAnchor anchor, Color color, bool bold = false)
         {
             var t = rt.gameObject.AddComponent<Text>();
             t.font = font;
             t.fontSize = size;
             t.alignment = anchor;
-            t.color = Color.white;
+            t.color = color;
+            t.fontStyle = bold ? FontStyle.Bold : FontStyle.Normal;
             t.raycastTarget = false;
             t.horizontalOverflow = HorizontalWrapMode.Wrap;
             t.verticalOverflow = VerticalWrapMode.Overflow;
             return t;
         }
 
-        Image Button(RectTransform parent, Vector2 anchor, Vector2 pos, Vector2 size, string text, int fontSize, Action onClick)
+        Text TextAt(RectTransform parent, float x, float y, float w, float h, int size, TextAnchor anchor, Color color, bool bold = false) =>
+            Label(At("Texto", parent, x, y, w, h), size, anchor, color, bold);
+
+        /// <summary>Button with an optional halo, rounded background, border, icon and caption.</summary>
+        Btn MakeButton(RectTransform parent, string name, float x, float y, float w, float h, float radius, string icon, float iconSize, string label, int labelSize, Action onClick, bool glow = false)
         {
-            var rt = Rect("Botón " + text, parent, anchor, anchor, pos, size);
-            var img = Panel(rt, ButtonColor);
-            var button = rt.gameObject.AddComponent<Button>();
-            button.targetGraphic = img;
-            var colors = button.colors;
-            colors.pressedColor = new Color(.75f, .75f, .75f);
-            button.colors = colors;
-            button.onClick.AddListener(() => onClick());
-            if (!string.IsNullOrEmpty(text))
+            var b = new Btn { Root = At(name, parent, x, y, w, h) };
+            var hit = b.Root.gameObject.AddComponent<Image>();
+            hit.color = Color.clear;
+            if (glow)
             {
-                var label = Label(Rect("Texto", rt, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero), fontSize, TextAnchor.MiddleCenter);
-                label.text = text;
-                label.fontStyle = FontStyle.Bold;
+                b.Glow = Stretch("Halo", b.Root, -18, -18, -18, -18).gameObject.AddComponent<Image>();
+                b.Glow.sprite = UiKit.Glow;
+                b.Glow.type = Image.Type.Sliced;
+                b.Glow.pixelsPerUnitMultiplier = 2.2f;
+                b.Glow.color = new Color(.25f, .6f, 1f, .55f);
+                b.Glow.raycastTarget = false;
+                b.Glow.gameObject.SetActive(false);
             }
-            return img;
+            var back = Stretch("Fondo", b.Root);
+            b.Back = back.gameObject.AddComponent<Image>();
+            b.Back.sprite = UiKit.Rounded;
+            b.Back.type = Image.Type.Sliced;
+            b.Back.pixelsPerUnitMultiplier = 24f / radius;
+            b.Back.color = UiKit.ButtonColor;
+            b.Back.raycastTarget = false;
+            b.Edge = Stretch("Borde", b.Root).gameObject.AddComponent<Image>();
+            b.Edge.sprite = UiKit.Outline;
+            b.Edge.type = Image.Type.Sliced;
+            b.Edge.pixelsPerUnitMultiplier = 24f / radius;
+            b.Edge.color = UiKit.EdgeColor;
+            b.Edge.raycastTarget = false;
+            if (icon != null) b.Icon = Icon(b.Root, icon, w * .5f, label != null ? h * .4f : h * .5f, iconSize, Color.white);
+            if (label != null)
+            {
+                b.Label = Label(At("Texto", b.Root, 0, label != null && icon != null ? h - 32 : 0, w, icon != null ? 28 : h), labelSize, TextAnchor.MiddleCenter, Color.white, true);
+                b.Label.text = label;
+            }
+            var button = b.Root.gameObject.AddComponent<Button>();
+            button.targetGraphic = hit;
+            button.transition = Selectable.Transition.None;
+            button.onClick.AddListener(() => onClick());
+            button.gameObject.AddComponent<PressFeedback>();
+            return b;
         }
+    }
+
+    /// <summary>Shrinks a button slightly while it is held down.</summary>
+    public sealed class PressFeedback : MonoBehaviour, UnityEngine.EventSystems.IPointerDownHandler, UnityEngine.EventSystems.IPointerUpHandler, UnityEngine.EventSystems.IPointerExitHandler
+    {
+        public void OnPointerDown(UnityEngine.EventSystems.PointerEventData e) => transform.localScale = Vector3.one * .94f;
+        public void OnPointerUp(UnityEngine.EventSystems.PointerEventData e) => transform.localScale = Vector3.one;
+        public void OnPointerExit(UnityEngine.EventSystems.PointerEventData e) => transform.localScale = Vector3.one;
     }
 }

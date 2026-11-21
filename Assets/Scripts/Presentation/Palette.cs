@@ -56,6 +56,7 @@ namespace Horizonte.Presentation
             new Entry("PreviewOk", "#5BE37C", .5f, 0, true),
             new Entry("PreviewBad", "#F2554C", .5f, 0, true),
             new Entry("PreviewDemolish", "#F2A33A", .5f, 0, true),
+            new Entry("Selection", "#4DB2FF", .5f, 0, true),
         };
 
         public const string Folder = "Materials";
@@ -95,7 +96,7 @@ namespace Horizonte.Presentation
             var shader = Shader.Find(e.Transparent ? "Universal Render Pipeline/Unlit" : "Universal Render Pipeline/Lit");
             var m = new Material(shader) { name = e.Name };
             var c = e.Color;
-            if (e.Transparent) c.a = .45f;
+            if (e.Transparent) c.a = e.Name == "Selection" ? .85f : .45f;
             m.SetColor("_BaseColor", c);
             if (!e.Transparent)
             {

@@ -111,6 +111,7 @@ namespace Horizonte.Tests
         public void SaveRoundTripKeepsTheCity()
         {
             var city = CityGenerator.Create(32, 32, 99);
+            city.Name = "Nueva Ardelia";
             city.Place(Structure.PowerPlant, 3, 3);
             city.Place(Structure.School, 8, 3);
             for (int d = 0; d < 45; d++) city.Step();
@@ -122,6 +123,37 @@ namespace Horizonte.Tests
             Assert.AreEqual(city.Money, copy.Money);
             Assert.AreEqual(city.Day, copy.Day);
             Assert.AreEqual(city.Population, copy.Population);
+            Assert.AreEqual(city.Name, copy.Name);
+        }
+
+        [Test]
+        public void LevelsFollowPopulation()
+        {
+            Assert.AreEqual(1, Progress.Level(0));
+            Assert.AreEqual(2, Progress.Level(50));
+            Assert.AreEqual(Progress.MaxLevel, Progress.Level(1000000));
+            Assert.AreEqual(.5f, Progress.LevelProgress(125), .001f);
+            Assert.AreEqual(1f, Progress.LevelProgress(1000000));
+        }
+
+        [Test]
+        public void SatisfactionDropsWithoutPowerAndWithHighTaxes()
+        {
+            var city = Flat();
+            city.Place(Structure.Road, 0, 5);
+            city.Place(Structure.Residential, 0, 4);
+            city.Level[city.Index(0, 4)] = 1;
+            city.Refresh();
+            int unpowered = city.Satisfaction;
+            Assert.Greater(unpowered, 0);
+            city.Place(Structure.PowerPlant, 1, 3);
+            city.Refresh();
+            int powered = city.Satisfaction;
+            Assert.Greater(powered, unpowered);
+            city.TaxRate = 20;
+            city.Refresh();
+            Assert.Less(city.Satisfaction, powered);
+            Assert.AreEqual(0, Progress.FirstOpenGoal(city));
         }
 
         [Test]
