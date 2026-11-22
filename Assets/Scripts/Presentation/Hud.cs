@@ -56,6 +56,10 @@ namespace Horizonte.Presentation
         RectTransform safe;
         /// <summary>Full width between the rounded corners: the bars at the top and bottom reach past the notch, which only covers the middle of the side.</summary>
         RectTransform wide;
+        RectTransform minimapPanel;
+        /// <summary>Space under the bottom bar and minimap: part of the home indicator's margin, never flush with the edge.</summary>
+        float bottomPad = 14;
+        const float MinimapSize = 206, MinimapGap = 16;
         const float WideMargin = 30;
         Rect lastSafeArea;
         float refreshAt, toastUntil, resetArmedUntil, mapRefreshAt;
@@ -78,8 +82,9 @@ namespace Horizonte.Presentation
         Image alertBadge;
         Text alertBadgeText;
         readonly List<string> alerts = new List<string>();
-        RectTransform popupPanel, taxRow, settingsRow;
-        Text popupTitle, popupBody, taxText;
+        RectTransform popupPanel, taxRow, loanRow, settingsRow;
+        Text popupTitle, popupBody, taxText, loanText;
+        Btn loanButton;
         Btn newCityButton;
         Popup popup;
 
@@ -143,7 +148,7 @@ namespace Horizonte.Presentation
 
         void BuildTopBar()
         {
-            var bar = Rect("Barra superior", wide, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -10), new Vector2(0, 92), new Vector2(.5f, 1));
+            var bar = Rect("Barra superior", wide, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -24), new Vector2(0, 92), new Vector2(.5f, 1));
             Panel(bar, UiKit.PanelColor, 20);
             var layout = bar.gameObject.AddComponent<HorizontalLayoutGroup>();
             layout.padding = new RectOffset(8, 8, 0, 0);
@@ -274,7 +279,7 @@ namespace Horizonte.Presentation
 
         void BuildGoals()
         {
-            goalsPanel = At("Objetivos", safe, 12, 114, 420, 172);
+            goalsPanel = At("Objetivos", safe, 12, 128, 420, 172);
             Panel(goalsPanel, UiKit.PanelColor, 18);
             Icon(goalsPanel, "target", 32, 28, 32, UiKit.AccentText);
             TextAt(goalsPanel, 58, 8, 250, 40, 25, TextAnchor.MiddleLeft, Color.white, true).text = "Objetivos";
@@ -334,7 +339,7 @@ namespace Horizonte.Presentation
 
         void BuildLeftColumn()
         {
-            var col = At("Columna", safe, 12, 298, 76, 216);
+            var col = At("Columna", safe, 12, 312, 76, 216);
             Panel(col, UiKit.PanelColor, 18);
             MakeButton(col, "Finanzas", 8, 8, 60, 60, 14, "chart", 32, null, 0, () => TogglePopup(Popup.Finance)).Edge.enabled = false;
             var alertsButton = MakeButton(col, "Avisos", 8, 78, 60, 60, 14, "warning", 32, null, 0, () => TogglePopup(Popup.Alerts));
@@ -351,7 +356,7 @@ namespace Horizonte.Presentation
 
         void BuildPopup()
         {
-            popupPanel = At("Ventana", safe, 100, 298, 440, 300);
+            popupPanel = At("Ventana", safe, 100, 312, 440, 300);
             Panel(popupPanel, UiKit.PanelColor, 18);
             popupTitle = TextAt(popupPanel, 22, 10, 330, 42, 25, TextAnchor.MiddleLeft, Color.white, true);
             var close = MakeButton(popupPanel, "Cerrar", 386, 8, 44, 44, 12, "close", 24, null, 0, () => TogglePopup(Popup.None));
@@ -367,6 +372,13 @@ namespace Horizonte.Presentation
             MakeButton(taxRow, "Bajar", 200, 6, 44, 44, 10, null, 0, "−", 28, () => game.ChangeTax(-1));
             taxText = TextAt(taxRow, 248, 0, 90, 56, 24, TextAnchor.MiddleCenter, UiKit.Gold, true);
             MakeButton(taxRow, "Subir", 342, 6, 44, 44, 10, null, 0, "+", 28, () => game.ChangeTax(1));
+
+            loanRow = At("Préstamo", popupPanel, 22, 0, 396, 56);
+            Panel(loanRow, UiKit.PanelInner, 12);
+            loanText = TextAt(loanRow, 16, 0, 180, 56, 18, TextAnchor.MiddleLeft, Color.white, true);
+            loanText.supportRichText = true;
+            loanButton = MakeButton(loanRow, "Pedir", 200, 6, 186, 44, 10, null, 0, $"Pedir $ {N(City.LoanAmount)}", 19, TakeLoan);
+            loanButton.Back.color = UiKit.Accent;
 
             settingsRow = At("Opciones", popupPanel, 22, 0, 396, 56);
             newCityButton = MakeButton(settingsRow, "Nueva ciudad", 0, 0, 396, 56, 14, null, 0, "Empezar una ciudad nueva", 22, NewCity);
@@ -385,13 +397,13 @@ namespace Horizonte.Presentation
             {
                 // Settings hang under the gear on the right; the rest open beside the left column.
                 popupPanel.anchorMin = popupPanel.anchorMax = popupPanel.pivot = new Vector2(1, 1);
-                popupPanel.anchoredPosition = new Vector2(-12, -114);
+                popupPanel.anchoredPosition = new Vector2(-12, -128);
                 HideInfo();
             }
             else
             {
                 popupPanel.anchorMin = popupPanel.anchorMax = popupPanel.pivot = new Vector2(0, 1);
-                popupPanel.anchoredPosition = new Vector2(100, -298);
+                popupPanel.anchoredPosition = new Vector2(100, -312);
             }
             FillPopup();
         }
@@ -401,6 +413,7 @@ namespace Horizonte.Presentation
             if (popup == Popup.None) return;
             var c = game.City;
             taxRow.gameObject.SetActive(popup == Popup.Finance);
+            loanRow.gameObject.SetActive(popup == Popup.Finance);
             settingsRow.gameObject.SetActive(popup == Popup.Settings);
             switch (popup)
             {
@@ -409,9 +422,14 @@ namespace Horizonte.Presentation
                     int net = c.LastIncome - c.LastExpenses;
                     popupBody.text = c.Day < City.DaysPerMonth
                         ? "El primer balance llega al terminar el mes.\n\n"
-                        : $"Ingresos del mes pasado:  <b>$ {N(c.LastIncome)}</b>\nGastos del mes pasado:  <b>$ {N(c.LastExpenses)}</b>\nBalance:  <b><color={Hex(net >= 0 ? UiKit.Good : UiKit.Bad)}>{Signed(net)}</color></b>\n\n";
-                    popupBody.text += "<color=#A9BCE0>Cada mes cobras impuestos a habitantes y empleos, y pagas el mantenimiento. Subir el impuesto da más dinero pero frena el crecimiento y baja la satisfacción.</color>";
+                        : $"Impuesto a habitantes:  <b>$ {N(c.LastResidentTax)}</b>\nImpuesto a comercios e industrias:  <b>$ {N(c.LastBusinessTax)}</b>\nMantenimiento:  <b>$ {N(c.LastUpkeep)}</b>\n" +
+                          (c.LastLoanPayment > 0 ? $"Cuota del préstamo:  <b>$ {N(c.LastLoanPayment)}</b>\n" : "") +
+                          $"Balance del mes:  <b><color={Hex(net >= 0 ? UiKit.Good : UiKit.Bad)}>{Signed(net)}</color></b>\n\n";
+                    popupBody.text += "<color=#A9BCE0>Cobras a habitantes y trabajadores, y a cada comercio e industria abierta según sus empleos. Subir el impuesto da más dinero pero frena el crecimiento y baja la satisfacción. El préstamo se paga en 24 cuotas con 10 % de interés.</color>";
                     taxText.text = $"{c.TaxRate} %";
+                    loanText.text = c.LoanBalance > 0 ? $"Debes $ {N(c.LoanBalance)}\n<color=#A9BCE0>$ {N(c.LoanPayment)} al mes</color>" : "Sin deudas";
+                    loanButton.Label.text = c.CanBorrow ? $"Pedir $ {N(City.LoanAmount)}" : "Límite alcanzado";
+                    loanButton.Back.color = c.CanBorrow ? UiKit.Accent : UiKit.ButtonColor;
                     break;
                 case Popup.Alerts:
                     popupTitle.text = "Avisos";
@@ -420,7 +438,7 @@ namespace Horizonte.Presentation
                 case Popup.Help:
                     popupTitle.text = "Cómo se juega";
                     popupBody.text =
-                        "Traza <b>calles</b> conectadas con la carretera y marca <b>zonas</b> a su lado. Construye una <b>central eléctrica</b>: sin calle y sin luz nada crece.\n\n" +
+                        "Traza <b>calles</b> conectadas con la carretera y coloca los edificios junto a ellas. Empieza con un <b>generador</b>, unas casas y una tienda: sin calle, sin luz y sin empleos nadie llega.\n\n" +
                         "<color=#A9BCE0>Un dedo construye o, en Explorar, mueve el mapa. Dos dedos mueven, acercan y giran. Toca un edificio para ver sus datos.</color>";
                     break;
                 case Popup.Settings:
@@ -432,13 +450,24 @@ namespace Horizonte.Presentation
             float bodyHeight = popupBody.preferredHeight;
             popupBody.rectTransform.sizeDelta = new Vector2(396, bodyHeight);
             float y = 58 + bodyHeight + 14;
-            foreach (var extra in new[] { taxRow, settingsRow })
+            foreach (var extra in new[] { taxRow, loanRow, settingsRow })
             {
                 if (!extra.gameObject.activeSelf) continue;
                 extra.anchoredPosition = new Vector2(22, -y);
                 y += 56 + 14;
             }
             popupPanel.sizeDelta = new Vector2(440, y + 8);
+        }
+
+        void TakeLoan()
+        {
+            if (!game.City.TakeLoan())
+            {
+                Toast("El banco ya no presta más hasta que pagues");
+                return;
+            }
+            Toast($"Recibiste $ {N(City.LoanAmount)} del banco");
+            Refresh();
         }
 
         void NewCity()
@@ -502,7 +531,7 @@ namespace Horizonte.Presentation
 
         void BuildMinimap()
         {
-            var panel = Rect("Minimapa", wide, Vector2.zero, Vector2.zero, new Vector2(0, 10), new Vector2(206, 206), Vector2.zero);
+            var panel = minimapPanel = Rect("Minimapa", wide, Vector2.zero, Vector2.zero, new Vector2(0, 10), new Vector2(206, 206), Vector2.zero);
             Panel(panel, UiKit.PanelColor, 18);
             var maskRt = Stretch("Máscara", panel, 8, 8, 8, 8);
             var maskImage = maskRt.gameObject.AddComponent<Image>();
@@ -612,16 +641,14 @@ namespace Horizonte.Presentation
             flyoutItem = item;
             var category = item.Category.Value;
             var defs = new List<BuildingDef>(Catalog.InCategory(category));
-            int index = Array.IndexOf(Tools.Bar, item);
-            var button = barButtons[index].button.Root;
-            float centre = button.anchoredPosition.x + button.sizeDelta.x * .5f - bottomBar.sizeDelta.x * .5f;
-            float available = wide.rect.width - 8;
-            float cw = Mathf.Min(190, (available - 8) / defs.Count - 8);
-            const float ch = 168, top = 46;
-            float flyWidth = defs.Count * (cw + 8) + 8;
-            float limit = Mathf.Max(0, wide.rect.width * .5f - flyWidth * .5f);
-            centre = Mathf.Clamp(centre, -limit, limit);
-            flyout = Rect("Menú " + item.Name, wide, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(centre, 128), new Vector2(flyWidth, ch + top + 8), new Vector2(.5f, 0));
+            const float ch = 168, top = 46, minCard = 160, gap = 8;
+            float left = MinimapSize + MinimapGap, available = wide.rect.width - left - MinimapGap;
+            int rows = (available - gap) / defs.Count - gap < minCard ? 2 : 1;
+            int perRow = (defs.Count + rows - 1) / rows;
+            float cw = Mathf.Min(190, (available - gap) / perRow - gap);
+            float flyWidth = perRow * (cw + gap) + gap;
+            float centre = left + available * .5f - wide.rect.width * .5f;
+            flyout = Rect("Menú " + item.Name, wide, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(centre, bottomPad + 116), new Vector2(flyWidth, top + rows * (ch + gap)), new Vector2(.5f, 0));
             Panel(flyout, UiKit.PanelColor, 18);
             TextAt(flyout, 16, 6, flyWidth - 32, 36, 22, TextAnchor.MiddleLeft, Color.white, true).text = Tools.CategoryName(category);
             var tint = Tools.CategoryColor(category);
@@ -630,7 +657,7 @@ namespace Horizonte.Presentation
                 var def = defs[k];
                 var tool = Tool.Build(def.Id);
                 bool locked = game.City.Population < def.MinPopulation;
-                var b = MakeButton(flyout, def.Name, 8 + k * (cw + 8), top, cw, ch, 14, Tools.Icon(def), 40, null, 0, () =>
+                var b = MakeButton(flyout, def.Name, gap + k % perRow * (cw + gap), top + k / perRow * (ch + gap), cw, ch, 14, Tools.Icon(def), 40, null, 0, () =>
                 {
                     if (locked)
                     {
@@ -711,7 +738,7 @@ namespace Horizonte.Presentation
 
         void BuildInfoPanel()
         {
-            infoPanel = Rect("Información", safe, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-12, -114), new Vector2(430, 600), new Vector2(1, 1));
+            infoPanel = Rect("Información", safe, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-12, -128), new Vector2(430, 600), new Vector2(1, 1));
             Panel(infoPanel, UiKit.PanelColor, 20);
 
             var tile = At("Ícono", infoPanel, 14, 14, 88, 88);
@@ -956,7 +983,7 @@ namespace Horizonte.Presentation
 
         void BuildToast()
         {
-            toastPanel = Rect("Aviso", wide, new Vector2(.5f, 1), new Vector2(.5f, 1), new Vector2(0, -114), new Vector2(600, 56), new Vector2(.5f, 1));
+            toastPanel = Rect("Aviso", wide, new Vector2(.5f, 1), new Vector2(.5f, 1), new Vector2(0, -128), new Vector2(600, 56), new Vector2(.5f, 1));
             Panel(toastPanel, new Color(.36f, .09f, .09f, .94f), 18, new Color(1, .5f, .45f, .6f));
             Icon(toastPanel, "warning", 34, 28, 30, UiKit.Warn);
             toastText = TextAt(toastPanel, 60, 0, 520, 56, 22, TextAnchor.MiddleLeft, Color.white, true);
@@ -996,7 +1023,12 @@ namespace Horizonte.Presentation
             safe.anchorMin = new Vector2(lastSafeArea.xMin / Screen.width, lastSafeArea.yMin / Screen.height);
             safe.anchorMax = new Vector2(lastSafeArea.xMax / Screen.width, lastSafeArea.yMax / Screen.height);
             safe.offsetMin = safe.offsetMax = Vector2.zero;
-            wide.anchorMin = new Vector2(0, safe.anchorMin.y);
+            wide.anchorMin = Vector2.zero;
+            bottomPad = Mathf.Max(14, safe.anchorMin.y * 887 * .45f + 4);
+            minimapPanel.anchoredPosition = new Vector2(0, bottomPad);
+            bottomBar.anchoredPosition = new Vector2(0, bottomPad);
+            hintPanel.anchoredPosition = new Vector2(0, bottomPad + 120);
+            if (flyout != null) flyout.anchoredPosition = new Vector2(flyout.anchoredPosition.x, bottomPad + 116);
             wide.anchorMax = new Vector2(1, safe.anchorMax.y);
             wide.offsetMin = new Vector2(WideMargin, 0);
             wide.offsetMax = new Vector2(-WideMargin, 0);

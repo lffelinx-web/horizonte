@@ -63,6 +63,17 @@ namespace Horizonte.Simulation
         public float DemandIndustrial { get; private set; }
         public int LastIncome { get; private set; }
         public int LastExpenses { get; private set; }
+        /// <summary>Last month's taxes from residents and workers, and from shops and factories.</summary>
+        public int LastResidentTax { get; private set; }
+        public int LastBusinessTax { get; private set; }
+        /// <summary>Last month's upkeep, and the loan instalment paid.</summary>
+        public int LastUpkeep { get; private set; }
+        public int LastLoanPayment { get; private set; }
+
+        public const int LoanAmount = 10000, LoanMonths = 24, MaxLoans = 5;
+        /// <summary>Money still owed to the bank (10 % interest included), paid off in monthly instalments.</summary>
+        public long LoanBalance;
+        public int LoanPayment;
         /// <summary>How happy residents are, 0 to 100 (0 while nobody lives in the city).</summary>
         public int Satisfaction { get; private set; }
         /// <summary>Satisfaction added by the town hall and similar buildings.</summary>
@@ -741,16 +752,38 @@ namespace Horizonte.Simulation
 
         void RunBudget()
         {
-            int income = (int)Math.Round((Population + Employed) * TaxRate / 4.0);
-            int expenses = 0;
+            // Residents and workers pay; every open shop, office and factory pays for the jobs it offers.
+            int residents = (int)Math.Round((Population + Employed) * TaxRate / 4.0);
+            int business = (int)Math.Round(Jobs * TaxRate / 5.0);
+            int upkeep = 0;
             for (int i = 0; i < Building.Length; i++)
             {
                 if (Anchor[i] != i) continue;
-                expenses += DefAt(i)?.Upkeep ?? 0;
+                upkeep += DefAt(i)?.Upkeep ?? 0;
             }
-            LastIncome = income;
-            LastExpenses = expenses;
-            Money += income - expenses;
+            int loan = (int)Math.Min(LoanPayment, LoanBalance);
+            LoanBalance -= loan;
+            if (LoanBalance <= 0) LoanPayment = 0;
+            LastResidentTax = residents;
+            LastBusinessTax = business;
+            LastUpkeep = upkeep;
+            LastLoanPayment = loan;
+            LastIncome = residents + business;
+            LastExpenses = upkeep + loan;
+            Money += LastIncome - LastExpenses;
+        }
+
+        /// <summary>Whether the bank will lend another <see cref="LoanAmount"/>.</summary>
+        public bool CanBorrow => LoanBalance + LoanAmount * 11 / 10 <= (long)LoanAmount * 11 / 10 * MaxLoans;
+
+        /// <summary>Borrows <see cref="LoanAmount"/> now, to be paid back with 10 % interest over <see cref="LoanMonths"/> months.</summary>
+        public bool TakeLoan()
+        {
+            if (!CanBorrow) return false;
+            Money += LoanAmount;
+            LoanBalance += LoanAmount * 11 / 10;
+            LoanPayment = (int)Math.Ceiling(LoanBalance / (double)LoanMonths);
+            return true;
         }
 
         public float NextRandom()

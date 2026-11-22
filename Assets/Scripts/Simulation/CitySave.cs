@@ -20,6 +20,8 @@ namespace Horizonte.Simulation
         /// <summary>Days left on buildings under construction (one byte per tile); missing in older saves.</summary>
         public string construction;
         public string[] models;
+        public long loanBalance;
+        public int loanPayment;
 
         public static CitySave From(City city)
         {
@@ -59,13 +61,15 @@ namespace Horizonte.Simulation
                 occupants = Convert.ToBase64String(occupants),
                 construction = Convert.ToBase64String(city.Construction),
                 models = table.ToArray(),
+                loanBalance = city.LoanBalance,
+                loanPayment = city.LoanPayment,
             };
         }
 
         public City ToCity()
         {
             if (version != CurrentVersion) throw new InvalidOperationException($"Save version {version} is from an older game.");
-            var city = new City(width, height, rng) { Money = money, Day = day, TaxRate = taxRate };
+            var city = new City(width, height, rng) { Money = money, Day = day, TaxRate = taxRate, LoanBalance = loanBalance, LoanPayment = loanPayment };
             if (!string.IsNullOrEmpty(name)) city.Name = name;
             int n = width * height;
             var t = Convert.FromBase64String(terrain);

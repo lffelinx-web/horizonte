@@ -143,6 +143,33 @@ namespace Horizonte.Tests
         }
 
         [Test]
+        public void LoansArePaidBackMonthly()
+        {
+            var city = Flat();
+            long before = city.Money;
+            for (int k = 0; k < City.MaxLoans; k++) Assert.IsTrue(city.TakeLoan());
+            Assert.IsFalse(city.TakeLoan());
+            Assert.AreEqual(before + City.LoanAmount * City.MaxLoans, city.Money);
+            Assert.AreEqual(55000, city.LoanBalance);
+            Days(city, City.DaysPerMonth);
+            Assert.AreEqual(2292, city.LastLoanPayment);
+            Assert.AreEqual(55000 - 2292, city.LoanBalance);
+        }
+
+        [Test]
+        public void ShopsPayTaxesAndTheGeneratorIsAvailableFromTheStart()
+        {
+            var city = Flat();
+            city.IgnoreRequirements = false;
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Id("generador"), 0, 11));
+            city.Place(Id("tienda_abarrotes"), 2, 11);
+            city.FinishConstruction();
+            Assert.IsTrue(city.Working(city.Index(2, 11)));
+            Days(city, City.DaysPerMonth);
+            Assert.AreEqual((int)System.Math.Round(6 * 9 / 5.0), city.LastBusinessTax);
+        }
+
+        [Test]
         public void MultiTileBuildingsAreBulldozedWhole()
         {
             var city = Flat();

@@ -187,6 +187,9 @@ namespace Horizonte.Simulation
             Work("industria_automatizada", "Industria automatizada", Category.Industry, 30000, 4, 4, 2, 160, true, 5000, -10, 4);
 
             // Energy.
+            // A small, cheap generator so a new town can afford its first lights.
+            var generator = Plant("generador", "Generador eléctrico", 800, 30, 1, 1, 1, 40, 7, 0, -8, 3);
+            generator.Summary = "40 MW · barato de mantener";
             Plant("central_termoelectrica", "Central termoeléctrica", 6000, 200, 3, 3, 3, 400, 12, 0, -35, 7);
             Plant("subestacion", "Subestación eléctrica", 800, 20, 1, 1, 1, 0, 10);
             Plant("planta_solar", "Planta solar", 5000, 40, 3, 3, 1, 120, 8, 200);
@@ -236,11 +239,11 @@ namespace Horizonte.Simulation
             var hall = Serve("ayuntamiento", "Ayuntamiento", Category.Safety, Service.None, 10000, 300, 3, 3, 4, 0, 500, 12);
             hall.CityBonus = 5;
             hall.DesireRadius = 6;
-            hall.Summary = "Satisfacción +5 en toda la ciudad";
+            hall.Summary = "Satisfacción +5 en la ciudad";
             var admin = Serve("centro_administrativo", "Centro administrativo", Category.Safety, Service.None, 20000, 500, 3, 3, 5, 0, 4000, 6);
             admin.CityBonus = 4;
             admin.DesireRadius = 5;
-            admin.Summary = "Satisfacción +4 en toda la ciudad";
+            admin.Summary = "Satisfacción +4 en la ciudad";
 
             // Education and research.
             Serve("guarderia", "Guardería", Category.Education, Service.Education, 1000, 60, 2, 1, 1, 8, 0, 6);
@@ -273,7 +276,7 @@ namespace Horizonte.Simulation
             var smart = Serve("gestion_urbana", "Centro de gestión urbana inteligente", Category.Parks, Service.None, 30000, 700, 3, 2, 4, 0, 10000, 8);
             smart.CityBonus = 6;
             smart.DesireRadius = 5;
-            smart.Summary = "Satisfacción +6 en toda la ciudad";
+            smart.Summary = "Satisfacción +6 en la ciudad";
         }
 
         /// <summary>Days a building takes to go up: a few for a house, weeks for big projects. Streets are instant.</summary>
