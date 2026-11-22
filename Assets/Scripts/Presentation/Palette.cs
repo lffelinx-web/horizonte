@@ -28,12 +28,12 @@ namespace Horizonte.Presentation
 
         public static readonly Entry[] Entries =
         {
-            new Entry("Grass", "#7FA35A", .05f),
-            new Entry("ForestFloor", "#5E7F42", .05f),
+            new Entry("Grass", "#86AD5C", .05f),
+            new Entry("ForestFloor", "#628744", .05f),
             new Entry("Bank", "#8C7556", .05f),
             new Entry("Water", "#3F7FA6", .92f),
             new Entry("Asphalt", "#3B3D42", .2f),
-            new Entry("Sidewalk", "#B9B5AC", .1f),
+            new Entry("Sidewalk", "#C9C4B8", .1f),
             new Entry("LaneLine", "#E8E2C8", .2f),
             new Entry("ZoneResidential", "#8CCB6A", .05f),
             new Entry("ZoneCommercial", "#6FA6D8", .05f),
@@ -41,6 +41,8 @@ namespace Horizonte.Presentation
             new Entry("Yard", "#86AE60", .05f),
             new Entry("Trunk", "#6B4A32", .05f),
             new Entry("Leaves", "#4C7A3A", .1f),
+            new Entry("StreetLamp", "#4A4F57", .4f, .5f),
+            new Entry("LampGlow", "#FFF1C9", .6f),
             new Entry("WallResidential", "#EDE3D1", .1f),
             new Entry("RoofResidential", "#B5553C", .2f),
             new Entry("WallCommercial", "#D7DADF", .3f),
@@ -78,8 +80,10 @@ namespace Horizonte.Presentation
             if (name == "Grass" || name == "ForestFloor" || name == "Yard" || name == "Sidewalk" || name == "Asphalt" || name == "Bank")
             {
                 m = new Material(m) { name = name };
-                m.SetTexture("_BaseMap", Detail());
-                m.SetTextureScale("_BaseMap", new Vector2(.125f, .125f));
+                // Grass gets broad patches of lusher and drier green; paving only a fine grain.
+                bool green = name == "Grass" || name == "ForestFloor" || name == "Yard";
+                m.SetTexture("_BaseMap", green ? Patches() : Detail());
+                m.SetTextureScale("_BaseMap", green ? new Vector2(1 / 160f, 1 / 160f) : new Vector2(.125f, .125f));
             }
             cache[name] = m;
             return m;
@@ -142,6 +146,44 @@ namespace Horizonte.Presentation
             detail.Apply(true, true);
             return detail;
         }
+
+        static Texture2D patches;
+
+        /// <summary>
+        /// 160 m of meadow: soft patches that shift between lush, dark and sun-dried green, over a fine grain.
+        /// Tiles without seams.
+        /// </summary>
+        static Texture2D Patches()
+        {
+            if (patches != null) return patches;
+            const int size = 512;
+            patches = new Texture2D(size, size, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Trilinear, anisoLevel = 4, name = "GrassPatches" };
+            var px = new Color32[size * size];
+            var lush = new Color(.86f, 1f, .8f);
+            var dark = new Color(.78f, .88f, .76f);
+            var dry = new Color(1f, .95f, .72f);
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float u = x / (float)size, w = y / (float)size;
+                float a = Seamless(PatchA, x, y, size, u, w), b = Seamless(PatchB, x, y, size, u, w);
+                var c = Color.Lerp(lush, dark, Mathf.SmoothStep(.35f, .7f, a));
+                c = Color.Lerp(c, dry, Mathf.SmoothStep(.55f, .8f, b) * .8f);
+                float grain = .92f + Seamless(Grain, x, y, size, u, w) * .14f;
+                px[y * size + x] = new Color(c.r * grain, c.g * grain, c.b * grain);
+            }
+            patches.SetPixels32(px);
+            patches.Apply(true, true);
+            return patches;
+        }
+
+        static float PatchA(float x, float y) => Mathf.PerlinNoise(x * .012f + 40, y * .012f + 90) * .65f + Mathf.PerlinNoise(x * .04f + 300, y * .04f + 20) * .35f;
+        static float Grain(float x, float y) => Mathf.PerlinNoise(x * .35f + 210, y * .35f + 870);
+        static float PatchB(float x, float y) => Mathf.PerlinNoise(x * .008f + 700, y * .008f + 150) * .7f + Mathf.PerlinNoise(x * .03f + 60, y * .03f + 610) * .3f;
+
+        /// <summary>Blends four shifted copies of a noise so the texture repeats without seams.</summary>
+        static float Seamless(System.Func<float, float, float> f, int x, int y, int size, float u, float w) =>
+            f(x, y) * (1 - u) * (1 - w) + f(x - size, y) * u * (1 - w) + f(x, y - size) * (1 - u) * w + f(x - size, y - size) * u * w;
 
         static float N(float x, float y) =>
             Mathf.PerlinNoise(x * .03f + 500, y * .03f + 500) * .5f + Mathf.PerlinNoise(x * .11f + 640, y * .11f + 640) * .3f + Mathf.PerlinNoise(x * .4f + 990, y * .4f + 990) * .2f;

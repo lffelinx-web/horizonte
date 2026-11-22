@@ -47,7 +47,10 @@ namespace Horizonte.Presentation
             Cam.transform.SetPositionAndRotation(Focus + rot * new Vector3(0, 0, -Distance), rot);
             // Shadows only need to cover what is in view; a short range keeps them sharp up close.
             if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline is UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset urp)
-                urp.shadowDistance = Mathf.Clamp(Distance * 2.4f, 110, 900);
+                urp.shadowDistance = Mathf.Clamp(Distance * 1.9f, 120, 700);
+            // The sun turns with the view and shines from behind on the left, so the sides we see are lit
+            // and shadows fall beside buildings instead of hiding behind them.
+            if (RenderSettings.sun != null) RenderSettings.sun.transform.rotation = Quaternion.Euler(34, Yaw + 65, 0);
         }
 
         /// <summary>Point on the ground (y = 0) under a screen position.</summary>

@@ -256,6 +256,10 @@ namespace Horizonte.Presentation
                 // Pop-up, building menu and a message.
                 SelectTool(Tool.Explore);
                 Hud.Showcase("finanzas");
+                for (int f = 0; f < 10; f++) yield return null;
+                ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_finanzas.png"));
+                yield return null;
+                yield return null;
                 Hud.Showcase("Parques");
                 Hud.Toast("Ejemplo de aviso");
                 for (int f = 0; f < 10; f++) yield return null;

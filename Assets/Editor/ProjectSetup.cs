@@ -20,6 +20,7 @@ namespace Horizonte.EditorTools
         const string ScenePath = "Assets/Scenes/Main.unity";
         const string PipelinePath = "Assets/Settings/UniversalRP.asset";
         const string VolumePath = "Assets/Settings/HorizonteVolume.asset";
+        const string RendererPath = "Assets/Settings/UniversalRenderer3D.asset";
         const string MaterialFolder = "Assets/Resources/Materials";
 
         [MenuItem("Horizonte/Configurar proyecto")]
@@ -112,7 +113,12 @@ namespace Horizonte.EditorTools
             pipeline.msaaSampleCount = 4;
             pipeline.supportsHDR = true;
             pipeline.shadowDistance = 260;
-            pipeline.shadowCascadeCount = 2;
+            pipeline.shadowCascadeCount = 4;
+            pipeline.shadowDepthBias = .6f;
+            pipeline.shadowNormalBias = .5f;
+            var pipelineData = new SerializedObject(pipeline);
+            pipelineData.FindProperty("m_SoftShadowsSupported").boolValue = true;
+            pipelineData.ApplyModifiedPropertiesWithoutUndo();
             pipeline.renderScale = 1;
             EditorUtility.SetDirty(pipeline);
             GraphicsSettings.defaultRenderPipeline = pipeline;
@@ -123,6 +129,41 @@ namespace Horizonte.EditorTools
                 QualitySettings.renderPipeline = pipeline;
             }
             QualitySettings.SetQualityLevel(current, false);
+            AddAmbientOcclusion();
+        }
+
+        /// <summary>Soft darkening where objects meet the ground and each other, sized for a city seen from above.</summary>
+        static void AddAmbientOcclusion()
+        {
+            var renderer = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(RendererPath);
+            if (renderer == null) throw new InvalidOperationException($"{RendererPath} is missing.");
+            var ao = renderer.rendererFeatures.Find(f => f is ScreenSpaceAmbientOcclusion) as ScreenSpaceAmbientOcclusion;
+            if (ao == null)
+            {
+                ao = ScriptableObject.CreateInstance<ScreenSpaceAmbientOcclusion>();
+                ao.name = "Oclusión ambiental";
+                AssetDatabase.AddObjectToAsset(ao, renderer);
+                renderer.rendererFeatures.Add(ao);
+                AssetDatabase.TryGetGUIDAndLocalFileIdentifier(ao, out _, out long id);
+                var data = new SerializedObject(renderer);
+                var map = data.FindProperty("m_RendererFeatureMap");
+                map.arraySize++;
+                map.GetArrayElementAtIndex(map.arraySize - 1).longValue = id;
+                data.ApplyModifiedPropertiesWithoutUndo();
+            }
+            var s = new SerializedObject(ao);
+            s.FindProperty("m_Settings.Intensity").floatValue = 1.4f;
+            s.FindProperty("m_Settings.Radius").floatValue = 1.6f;
+            s.FindProperty("m_Settings.Falloff").floatValue = 900;
+            s.FindProperty("m_Settings.DirectLightingStrength").floatValue = .3f;
+            s.FindProperty("m_Settings.Downsample").boolValue = true;
+            s.FindProperty("m_Settings.Samples").enumValueIndex = 2;
+            s.FindProperty("m_Settings.BlurQuality").enumValueIndex = 1;
+            s.ApplyModifiedPropertiesWithoutUndo();
+            ao.SetActive(true);
+            EditorUtility.SetDirty(ao);
+            EditorUtility.SetDirty(renderer);
+            AssetDatabase.SaveAssets();
         }
 
         static void CreateMaterials()
@@ -148,25 +189,29 @@ namespace Horizonte.EditorTools
 
         static VolumeProfile CreateVolumeProfile()
         {
-            var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(VolumePath);
-            if (profile != null) return profile;
+            AssetDatabase.DeleteAsset(VolumePath);
+            VolumeProfile profile;
             profile = ScriptableObject.CreateInstance<VolumeProfile>();
             AssetDatabase.CreateAsset(profile, VolumePath);
 
             var tone = profile.Add<Tonemapping>(true);
             tone.mode.Override(TonemappingMode.ACES);
             var bloom = profile.Add<Bloom>(true);
-            bloom.threshold.Override(1.1f);
-            bloom.intensity.Override(.35f);
+            bloom.threshold.Override(1f);
+            bloom.intensity.Override(.3f);
             bloom.scatter.Override(.6f);
             var color = profile.Add<ColorAdjustments>(true);
-            color.postExposure.Override(.35f);
-            color.contrast.Override(12);
-            color.saturation.Override(10);
+            color.postExposure.Override(.45f);
+            color.contrast.Override(18);
+            color.saturation.Override(20);
+            var split = profile.Add<SplitToning>(true);
+            split.shadows.Override(new Color(.42f, .5f, .62f));
+            split.highlights.Override(new Color(.62f, .55f, .44f));
+            split.balance.Override(-15);
             var white = profile.Add<WhiteBalance>(true);
-            white.temperature.Override(6);
+            white.temperature.Override(9);
             var vignette = profile.Add<Vignette>(true);
-            vignette.intensity.Override(.22f);
+            vignette.intensity.Override(.18f);
             vignette.smoothness.Override(.5f);
             foreach (var component in profile.components) AssetDatabase.AddObjectToAsset(component, profile);
             EditorUtility.SetDirty(profile);
@@ -190,10 +235,10 @@ namespace Horizonte.EditorTools
             var sunGo = new GameObject("Sol", typeof(Light));
             var sun = sunGo.GetComponent<Light>();
             sun.type = LightType.Directional;
-            sun.color = new Color(1, .95f, .86f);
-            sun.intensity = 1.5f;
-            sun.shadows = LightShadows.Hard;
-            sun.shadowStrength = .8f;
+            sun.color = new Color(1, .93f, .8f);
+            sun.intensity = 1.75f;
+            sun.shadows = LightShadows.Soft;
+            sun.shadowStrength = .9f;
             sunGo.transform.rotation = Quaternion.Euler(47, -38, 0);
             sunGo.AddComponent<UniversalAdditionalLightData>();
 
@@ -207,8 +252,8 @@ namespace Horizonte.EditorTools
 
             RenderSettings.skybox = null;
             RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(.62f, .72f, .86f);
-            RenderSettings.ambientEquatorColor = new Color(.56f, .6f, .58f);
+            RenderSettings.ambientSkyColor = new Color(.56f, .66f, .82f);
+            RenderSettings.ambientEquatorColor = new Color(.5f, .55f, .52f);
             RenderSettings.ambientGroundColor = new Color(.32f, .3f, .26f);
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;

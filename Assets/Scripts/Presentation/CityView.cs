@@ -16,8 +16,8 @@ namespace Horizonte.Presentation
         const float WaterLevel = -.9f;
 
         // Ground slots, in material order.
-        const int SGrass = 0, SForest = 1, SBank = 2, SAsphalt = 3, SSidewalk = 4, SLine = 5, SZoneR = 6, SZoneC = 7, SZoneI = 8, SYard = 9, STrunk = 10, SLeaves = 11;
-        static readonly string[] GroundMaterials = { "Grass", "ForestFloor", "Bank", "Asphalt", "Sidewalk", "LaneLine", "ZoneResidential", "ZoneCommercial", "ZoneIndustrial", "Yard", "Trunk", "Leaves" };
+        const int SGrass = 0, SForest = 1, SBank = 2, SAsphalt = 3, SSidewalk = 4, SLine = 5, SZoneR = 6, SZoneC = 7, SZoneI = 8, SYard = 9, STrunk = 10, SLeaves = 11, SLamp = 12, SGlow = 13;
+        static readonly string[] GroundMaterials = { "Grass", "ForestFloor", "Bank", "Asphalt", "Sidewalk", "LaneLine", "ZoneResidential", "ZoneCommercial", "ZoneIndustrial", "Yard", "Trunk", "Leaves", "StreetLamp", "LampGlow" };
 
         City city;
         int chunksX, chunksY;
@@ -305,6 +305,8 @@ namespace Horizonte.Presentation
             if (!w) Sidewalk(x0, z0 + curb, x0 + curb, z1 - curb, sidewalkHeight);
             if (!e) Sidewalk(x1 - curb, z0 + curb, x1, z1 - curb, sidewalkHeight);
 
+            StreetFurniture(x, y, x0, z0, s, w, n, e, curb, sidewalkHeight);
+
             // Dashed centre lines; none inside junctions. Avenues get a planted median instead.
             if (links > 2) return;
             if (avenue)
@@ -325,6 +327,40 @@ namespace Horizonte.Presentation
                 float from = w ? x0 : mx, to = e ? x1 : mx;
                 for (float xx = from + .3f; xx + dash <= to + .01f; xx += dash * 2) builder.Flat(SLine, xx, mz - lineWidth, xx + dash, mz + lineWidth, lineY);
             }
+        }
+
+        /// <summary>
+        /// Along straight stretches, a street lamp every other tile on one side and a small tree on the other,
+        /// alternating so the street reads as a lived-in place.
+        /// </summary>
+        void StreetFurniture(int x, int y, float x0, float z0, bool s, bool w, bool n, bool e, float curb, float h)
+        {
+            bool northSouth = (s || n) && !w && !e, eastWest = (w || e) && !s && !n;
+            if (!northSouth && !eastWest) return;
+            float mid = TileSize * .5f, side = curb * .5f;
+            int step = northSouth ? y : x;
+            // Lamp on one sidewalk, tree on the opposite one, swapping every tile.
+            bool lamp = (step & 1) == 0;
+            if (northSouth)
+            {
+                if (lamp) Lamp(new Vector3(x0 + side, h, z0 + mid), Vector3.right);
+                else Tree(builder, SLeaves, STrunk, new Vector3(x0 + TileSize - side, h, z0 + mid), .5f);
+            }
+            else
+            {
+                if (lamp) Lamp(new Vector3(x0 + mid, h, z0 + side), Vector3.forward);
+                else Tree(builder, SLeaves, STrunk, new Vector3(x0 + mid, h, z0 + TileSize - side), .5f);
+            }
+        }
+
+        void Lamp(Vector3 at, Vector3 towardRoad)
+        {
+            const float height = 5.6f, reach = 1.5f;
+            builder.Box(SLamp, at, new Vector3(.2f, height, .2f));
+            var arm = at + towardRoad * reach * .5f + Vector3.up * (height - .12f);
+            builder.Box(SLamp, arm, new Vector3(towardRoad.x != 0 ? reach : .12f, .12f, towardRoad.z != 0 ? reach : .12f));
+            var head = at + towardRoad * reach + Vector3.up * (height - .3f);
+            builder.Box(SGlow, head, new Vector3(towardRoad.x != 0 ? .7f : .34f, .2f, towardRoad.z != 0 ? .7f : .34f));
         }
 
         void Sidewalk(float x0, float z0, float x1, float z1, float h)
