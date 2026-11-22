@@ -65,7 +65,7 @@ namespace Horizonte.Tests
             var city = Flat();
             city.Place(Id("central_termoelectrica"), 0, 11);
             for (int x = 4; x < 12; x++) city.Place(Id("casa_basica"), x, 11);
-            city.Place(Id("tienda_abarrotes"), 4, 9);
+            city.Place(Id("tienda_abarrotes"), 4, 8);
             city.Place(Id("granja_agricola"), 6, 6);
             city.FinishConstruction();
             Assert.IsTrue(city.Working(city.Index(4, 11)));
@@ -208,7 +208,7 @@ namespace Horizonte.Tests
             city.Name = "Nueva Ardelia";
             city.Place(Id("central_termoelectrica"), 0, 11);
             city.Place(Id("apartamentos"), 4, 11);
-            city.Place(Id("tienda_abarrotes"), 4, 9);
+            city.Place(Id("tienda_abarrotes"), 4, 8);
             Days(city, 60);
             var copy = CitySave.From(city).ToCity();
             CollectionAssert.AreEqual(city.Building, copy.Building);

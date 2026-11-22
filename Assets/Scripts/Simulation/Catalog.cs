@@ -167,14 +167,14 @@ namespace Horizonte.Simulation
             Home("torre_residencial", "Torre residencial", 16000, 3, 3, 15, 320, 1200);
 
             // Commerce and offices.
-            Work("tienda_abarrotes", "Tienda de abarrotes", Category.Commerce, 450, 1, 1, 1, 6, false);
-            Work("mercado_municipal", "Mercado municipal", Category.Commerce, 2500, 2, 2, 2, 25, false, 100);
-            Work("supermercado", "Supermercado", Category.Commerce, 4500, 3, 2, 1, 40, false, 250);
-            Work("restaurante", "Restaurante", Category.Commerce, 1200, 1, 1, 2, 12, false, 60, 6, 3);
-            Work("centro_comercial", "Centro comercial", Category.Commerce, 14000, 4, 3, 3, 130, false, 900, 5, 5);
-            Work("edificio_oficinas", "Edificio de oficinas", Category.Commerce, 9000, 2, 2, 5, 120, false, 700);
-            Work("torre_corporativa", "Torre corporativa", Category.Commerce, 26000, 3, 3, 18, 360, false, 2500);
-            Work("centro_financiero", "Centro financiero", Category.Commerce, 45000, 4, 4, 14, 600, false, 6000, 6, 6);
+            Work("tienda_abarrotes", "Tienda de abarrotes", Category.Commerce, 450, 2, 2, 1, 6, false);
+            Work("mercado_municipal", "Mercado municipal", Category.Commerce, 2500, 3, 3, 2, 25, false, 100);
+            Work("supermercado", "Supermercado", Category.Commerce, 4500, 4, 3, 1, 40, false, 250);
+            Work("restaurante", "Restaurante", Category.Commerce, 1200, 3, 3, 2, 12, false, 60, 6, 3);
+            Work("centro_comercial", "Centro comercial", Category.Commerce, 14000, 4, 4, 3, 130, false, 900, 5, 5);
+            Work("edificio_oficinas", "Edificio de oficinas", Category.Commerce, 9000, 3, 3, 5, 120, false, 700);
+            Work("torre_corporativa", "Torre corporativa", Category.Commerce, 26000, 4, 3, 18, 360, false, 2500);
+            Work("centro_financiero", "Centro financiero", Category.Commerce, 45000, 5, 4, 14, 600, false, 6000, 6, 6);
 
             // Industry and production.
             Work("granja_agricola", "Granja agrícola", Category.Industry, 1500, 4, 4, 1, 12, true);
@@ -246,12 +246,12 @@ namespace Horizonte.Simulation
             admin.Summary = "Satisfacción +4 en la ciudad";
 
             // Education and research.
-            Serve("guarderia", "Guardería", Category.Education, Service.Education, 1000, 60, 2, 1, 1, 8, 0, 6);
-            Serve("escuela_primaria", "Escuela primaria", Category.Education, Service.Education, 3000, 140, 3, 2, 2, 13, 200, 10);
-            Serve("escuela_secundaria", "Escuela secundaria", Category.Education, Service.Education, 6000, 240, 3, 3, 3, 17, 800, 8);
+            Serve("guarderia", "Guardería", Category.Education, Service.Education, 1000, 60, 2, 2, 1, 8, 0, 6);
+            Serve("escuela_primaria", "Escuela primaria", Category.Education, Service.Education, 3000, 140, 3, 3, 2, 13, 200, 10);
+            Serve("escuela_secundaria", "Escuela secundaria", Category.Education, Service.Education, 6000, 240, 4, 3, 3, 17, 800, 8);
             Serve("instituto_tecnico", "Instituto técnico", Category.Education, Service.Education, 9000, 320, 3, 3, 4, 19, 2000, 8);
             Serve("universidad", "Universidad", Category.Education, Service.Education, 30000, 900, 5, 4, 5, 30, 6000, 14);
-            Serve("biblioteca", "Biblioteca pública", Category.Education, Service.Culture, 3000, 120, 2, 2, 2, 13, 400, 10);
+            Serve("biblioteca", "Biblioteca pública", Category.Education, Service.Culture, 3000, 120, 3, 3, 2, 13, 400, 10);
             Serve("centro_investigacion", "Centro de investigación", Category.Education, Service.Education, 40000, 1100, 5, 3, 5, 24, 10000, 10);
 
             // Health: footprints follow the real models.
