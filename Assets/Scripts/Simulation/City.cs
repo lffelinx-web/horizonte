@@ -529,11 +529,69 @@ namespace Horizonte.Simulation
                 if (Anchor[i] != i || !Working(i)) continue;
                 var def = DefAt(i);
                 bonus += def.CityBonus;
-                if (def.Service == Service.None || def.Radius <= 0) continue;
+                if (def.Service == Service.None || def.Radius <= 0 || Catalog.IsUtility(def.Service)) continue;
                 ushort bit = (ushort)(1 << (int)def.Service);
                 StampCircle(i, def.Radius, t => Coverage[t] |= bit);
             }
+            foreach (var s in Catalog.Utilities) ShareUtility(s);
             CityBonus = Math.Min(15, bonus);
+        }
+
+        readonly int[] utilitySupply = new int[16], utilityDemand = new int[16];
+
+        /// <summary>Daily capacity of the working water, sewage or waste buildings.</summary>
+        public int UtilitySupply(Service s) => utilitySupply[(int)s];
+
+        /// <summary>Daily use of a utility by the buildings that have a connected street.</summary>
+        public int UtilityDemand(Service s) => utilityDemand[(int)s];
+
+        /// <summary>
+        /// Like power: pipes and trucks reach a radius around each working plant, and the buildings in reach are served
+        /// nearest first until the capacity runs out.
+        /// </summary>
+        void ShareUtility(Service s)
+        {
+            int n = Width * Height;
+            var reach = new bool[n];
+            var providers = new List<int>();
+            int supply = 0, demand = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (Anchor[i] != i || !Working(i)) continue;
+                var def = DefAt(i);
+                if (def.Service != s || def.Capacity <= 0) continue;
+                providers.Add(i);
+                supply += def.Capacity;
+                StampCircle(i, def.Radius, t => reach[t] = true);
+            }
+            var consumers = new List<(float d, int anchor, int use)>();
+            for (int i = 0; i < n; i++)
+            {
+                if (Anchor[i] != i || !Served[i] || Construction[i] > 0) continue;
+                var def = DefAt(i);
+                if (def.IsRoad || def.Service == s) continue;
+                int use = Catalog.Use(def, s, Occupants[i]);
+                demand += use;
+                if (!Any(i, reach)) continue;
+                float best = float.MaxValue;
+                foreach (int p in providers) best = Math.Min(best, Distance(p, i));
+                consumers.Add((best, i, use));
+            }
+            consumers.Sort((p, q) => p.d.CompareTo(q.d));
+            ushort bit = (ushort)(1 << (int)s);
+            int remaining = supply;
+            foreach (var (_, a, use) in consumers)
+            {
+                if (use > remaining) continue;
+                remaining -= use;
+                var def = DefAt(a);
+                int ax = a % Width, ay = a / Width;
+                for (int dy = 0; dy < def.Height; dy++)
+                for (int dx = 0; dx < def.Width; dx++)
+                    Coverage[Index(ax + dx, ay + dy)] |= bit;
+            }
+            utilitySupply[(int)s] = supply;
+            utilityDemand[(int)s] = demand;
         }
 
         // ---------------------------------------------------------------- time

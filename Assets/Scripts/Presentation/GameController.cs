@@ -262,6 +262,17 @@ namespace Horizonte.Presentation
                 ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_interfaz_2.png"));
                 yield return null;
                 yield return null;
+
+                // The grid that shows up while building.
+                Hud.Showcase("Parques");
+                SelectTool(Tool.Build("casa_basica"));
+                Rig.Focus = CityView.TileCentre(City.Width / 2 - 12, City.Height / 2 + 12);
+                Rig.Yaw = 20;
+                Rig.Distance = 170;
+                for (int f = 0; f < 10; f++) yield return null;
+                ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_cuadricula.png"));
+                yield return null;
+                yield return null;
             }
             Application.Quit();
         }

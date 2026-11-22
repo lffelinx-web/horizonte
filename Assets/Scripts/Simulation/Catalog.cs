@@ -41,6 +41,8 @@ namespace Horizonte.Simulation
         public Service Service;
         /// <summary>Tiles covered by the service.</summary>
         public int Radius;
+        /// <summary>Water (m³), sewage (m³) or waste (kg) the building handles per day, shared among the buildings in its radius.</summary>
+        public int Capacity;
         /// <summary>Desirability at the centre, fading to zero at <see cref="DesireRadius"/>.</summary>
         public int Desirability;
         public int DesireRadius;
@@ -208,6 +210,21 @@ namespace Horizonte.Simulation
             waste.PowerSupply = 150;
             waste.PowerReach = 8;
             waste.Summary = "Alcance 24 · 150 MW";
+            void Supplies(string model, int capacity)
+            {
+                var d = Get(model);
+                d.Capacity = capacity;
+                d.Summary = $"{capacity} {UtilityUnit(d.Service)} al día · alcance {d.Radius}";
+            }
+            Supplies("estacion_bombeo", 60);
+            Supplies("planta_potabilizadora", 700);
+            Supplies("tanque_agua", 220);
+            Supplies("control_alcantarillado", 120);
+            Supplies("planta_tratamiento", 900);
+            Supplies("recoleccion_basura", 500);
+            Supplies("planta_reciclaje", 1800);
+            Supplies("valorizacion_energetica", 3500);
+            waste.Summary = "3 500 kg al día · 150 MW";
 
             // Safety and government.
             Serve("puesto_policia", "Puesto de policía", Category.Safety, Service.Safety, 700, 60, 1, 1, 1, 9, 0, 5);
@@ -264,6 +281,26 @@ namespace Horizonte.Simulation
             def.IsRoad ? 0 : System.Math.Max(3, System.Math.Min(60, (int)System.Math.Round(System.Math.Sqrt(def.Cost) / 6)));
 
         // ---------------------------------------------------------------- services
+
+        /// <summary>Services shared out by capacity, like power: water, sewage and waste.</summary>
+        public static readonly Service[] Utilities = { Service.Water, Service.Sewage, Service.Waste };
+
+        public static bool IsUtility(Service s) => s == Service.Water || s == Service.Sewage || s == Service.Waste;
+
+        public static string UtilityUnit(Service s) => s == Service.Waste ? "kg" : "m³";
+
+        /// <summary>Daily use of a utility: homes by the people living there, workplaces by their jobs, the rest by size.</summary>
+        public static int Use(BuildingDef d, Service s, int occupants)
+        {
+            if (d == null || d.IsRoad || d.Service == s) return 0;
+            bool waste = s == Service.Waste;
+            switch (d.Kind)
+            {
+                case Kind.Housing: return waste ? occupants : (occupants + 4) / 5;
+                case Kind.Jobs: return waste ? d.Jobs / 2 + 1 : d.Jobs / 10 + 1;
+                default: return System.Math.Max(1, d.Width * d.Height / (waste ? 1 : 2));
+            }
+        }
 
         /// <summary>Spanish name of a service, for the interface.</summary>
         public static string ServiceName(Service s)

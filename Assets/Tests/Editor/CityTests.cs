@@ -125,6 +125,24 @@ namespace Horizonte.Tests
         }
 
         [Test]
+        public void WaterIsSharedByCapacity()
+        {
+            var city = Flat();
+            city.Place(Id("central_termoelectrica"), 0, 11);
+            city.Place(Id("estacion_bombeo"), 4, 9);
+            city.Place(Id("casa_basica"), 5, 11);
+            city.Place(Id("torre_residencial"), 8, 11);
+            city.FinishConstruction();
+            city.Occupants[city.Index(5, 11)] = 4;
+            city.Occupants[city.Index(8, 11)] = 320;
+            city.Refresh();
+            Assert.AreEqual(60, city.UtilitySupply(Service.Water));
+            Assert.AreEqual(1 + 64 + 4, city.UtilityDemand(Service.Water));
+            Assert.IsTrue(city.Covered(city.Index(5, 11), Service.Water));
+            Assert.IsFalse(city.Covered(city.Index(8, 11), Service.Water));
+        }
+
+        [Test]
         public void MultiTileBuildingsAreBulldozedWhole()
         {
             var city = Flat();

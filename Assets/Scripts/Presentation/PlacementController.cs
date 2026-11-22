@@ -53,6 +53,7 @@ namespace Horizonte.Presentation
         public void SetTool(Tool t)
         {
             Tool = t;
+            game.View.ShowGrid(t.IsBuild);
             CancelPress();
         }
 

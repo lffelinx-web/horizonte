@@ -58,6 +58,60 @@ namespace Horizonte.Presentation
             selectionFilter.gameObject.SetActive(true);
         }
 
+        MeshFilter gridFilter;
+        readonly MeshBuilder gridMesh = new MeshBuilder(2);
+        bool gridVisible;
+
+        /// <summary>
+        /// While building, faint lines mark the free tiles near the streets, and the tiles that touch a street (where
+        /// buildings can go) get a soft tint, so it is easy to see how much room there is.
+        /// </summary>
+        public void ShowGrid(bool visible)
+        {
+            gridVisible = visible;
+            if (visible) RebuildGrid();
+            else if (gridFilter != null) gridFilter.gameObject.SetActive(false);
+        }
+
+        void RebuildGrid()
+        {
+            if (gridFilter == null)
+            {
+                var go = new GameObject("Cuadrícula", typeof(MeshFilter), typeof(MeshRenderer));
+                go.transform.SetParent(transform, false);
+                var mr = go.GetComponent<MeshRenderer>();
+                mr.sharedMaterials = Palette.Get("Grid", "GridFront");
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                mr.receiveShadows = false;
+                gridFilter = go.GetComponent<MeshFilter>();
+                gridFilter.sharedMesh = new Mesh();
+            }
+            gridMesh.Clear();
+            const int near = 4;
+            const float line = .09f, inset = .06f, y = .1f;
+            for (int ty = 0; ty < city.Height; ty++)
+            for (int tx = 0; tx < city.Width; tx++)
+            {
+                int i = city.Index(tx, ty);
+                if (city.Building[i] != Catalog.None || city.Terrain[i] == Simulation.Terrain.Water) continue;
+                bool roadNear = false;
+                for (int dy = -near; dy <= near && !roadNear; dy++)
+                for (int dx = -near; dx <= near && !roadNear; dx++)
+                    roadNear = city.IsRoad(tx + dx, ty + dy);
+                if (!roadNear) continue;
+                float x0 = tx * TileSize + inset, z0 = ty * TileSize + inset, x1 = (tx + 1) * TileSize - inset, z1 = (ty + 1) * TileSize - inset;
+                gridMesh.Flat(0, x0, z0, x1, z0 + line, y);
+                gridMesh.Flat(0, x0, z1 - line, x1, z1, y);
+                gridMesh.Flat(0, x0, z0 + line, x0 + line, z1 - line, y);
+                gridMesh.Flat(0, x1 - line, z0 + line, x1, z1 - line, y);
+                bool front = false;
+                for (int d = 0; d < 4; d++) front |= city.IsRoad(tx + City.DX[d], ty + City.DY[d]);
+                if (front) gridMesh.Flat(1, x0 + .5f, z0 + .5f, x1 - .5f, z1 - .5f, y - .02f);
+            }
+            gridFilter.sharedMesh = gridMesh.ToMesh(gridFilter.sharedMesh);
+            gridFilter.gameObject.SetActive(true);
+        }
+
         public void ClearSelection()
         {
             if (selectionFilter != null) selectionFilter.gameObject.SetActive(false);
@@ -73,6 +127,7 @@ namespace Horizonte.Presentation
             selectionFilter = null;
             buildings.Clear();
             sites.Clear();
+            gridFilter = null;
             buildingRoot = new GameObject("Edificios").transform;
             buildingRoot.SetParent(transform, false);
 
@@ -141,6 +196,7 @@ namespace Horizonte.Presentation
                 MarkChunk(x, y + 1);
                 RefreshBuilding(i);
             }
+            if (gridVisible && changes.Count > 0) RebuildGrid();
             RebuildDirty();
         }
 

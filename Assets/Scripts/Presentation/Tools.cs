@@ -119,7 +119,7 @@ namespace Horizonte.Presentation
         public static string Icon(BuildingDef def)
         {
             if (def.Category == Category.Health && def.Model == "laboratorio") return "flask";
-            if (def.Category == Category.Water) return def.Service == Service.Waste ? "bulldoze" : "water";
+            if (def.Category == Category.Water) return def.Service == Service.Waste ? "trash" : "water";
             return CategoryIcon(def.Category);
         }
 

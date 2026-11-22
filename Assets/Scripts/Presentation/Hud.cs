@@ -54,16 +54,19 @@ namespace Horizonte.Presentation
         GameController game;
         Font font;
         RectTransform safe;
+        /// <summary>Full width between the rounded corners: the bars at the top and bottom reach past the notch, which only covers the middle of the side.</summary>
+        RectTransform wide;
+        const float WideMargin = 30;
         Rect lastSafeArea;
         float refreshAt, toastUntil, resetArmedUntil, mapRefreshAt;
 
         // Top bar.
         InputField cityName;
-        Text levelText, popValue, popSub, satValue, satSub, moneyValue, moneySub, powerValue, powerSub, dateText, dayText;
+        Text levelText, popValue, popSub, satValue, satSub, moneyValue, moneySub;
+        readonly Text[] resourceValues = new Text[4];
         Image satIcon;
         RectTransform levelFill;
         readonly RectTransform[] demandFill = new RectTransform[3];
-        readonly Btn[] speedButtons = new Btn[3];
 
         // Goals.
         RectTransform goalsPanel;
@@ -99,7 +102,7 @@ namespace Horizonte.Presentation
         Text infoTitle, infoSubtitle, upkeepValue, demolishLabel;
         Btn demolishButton;
         readonly Card[] cards = new Card[4];
-        readonly Row[] rows = new Row[5];
+        readonly Row[] rows = new Row[6];
         Vector2Int selected = new Vector2Int(-1, -1);
 
         // Messages.
@@ -121,6 +124,7 @@ namespace Horizonte.Presentation
             scaler.matchWidthOrHeight = 1;
 
             safe = Rect("Zona segura", canvasGo.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            wide = Rect("Ancho completo", canvasGo.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
             BuildTopBar();
             BuildGoals();
             BuildLeftColumn();
@@ -139,7 +143,7 @@ namespace Horizonte.Presentation
 
         void BuildTopBar()
         {
-            var bar = Rect("Barra superior", safe, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -10), new Vector2(-24, 92), new Vector2(.5f, 1));
+            var bar = Rect("Barra superior", wide, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -10), new Vector2(0, 92), new Vector2(.5f, 1));
             Panel(bar, UiKit.PanelColor, 20);
             var layout = bar.gameObject.AddComponent<HorizontalLayoutGroup>();
             layout.padding = new RectOffset(8, 8, 0, 0);
@@ -172,7 +176,7 @@ namespace Horizonte.Presentation
             (popValue, popSub, _) = Stat(bar, "Población", 190, "people", new Color(.75f, .86f, 1f), "Población");
             (satValue, satSub, satIcon) = Stat(bar, "Satisfacción", 190, "smile", UiKit.Good, "Satisfacción");
             (moneyValue, moneySub, _) = Stat(bar, "Presupuesto", 240, "coin", UiKit.Gold, "Presupuesto");
-            (powerValue, powerSub, _) = Stat(bar, "Energía", 240, "bolt", UiKit.Warn, "Energía");
+            BuildResources(bar);
 
             // Demand: bars grow up when the city wants more of a zone and down when there is too much.
             var demand = Block(bar, "Demanda", 140);
@@ -196,23 +200,32 @@ namespace Horizonte.Presentation
             spacer.transform.SetParent(bar, false);
             spacer.GetComponent<LayoutElement>().flexibleWidth = 1;
 
-            var date = Block(bar, "Fecha", 150, false);
-            dateText = TextAt(date, 0, 14, 150, 24, 19, TextAnchor.MiddleCenter, UiKit.TextDim);
-            dayText = TextAt(date, 0, 40, 150, 38, 30, TextAnchor.MiddleCenter, Color.white, true);
-
-            var speed = Block(bar, "Velocidad", 180, false);
-            var pill = At("Botones", speed, 8, 15, 164, 62);
-            Panel(pill, UiKit.PanelInner, 31);
-            string[] icons = { "pause", "play", "fast" };
-            for (int k = 0; k < 3; k++)
-            {
-                int s = k;
-                speedButtons[k] = MakeButton(pill, icons[k], 6 + k * 51, 6, 50, 50, 25, icons[k], 28, null, 0, () => game.SetSpeed(s));
-                speedButtons[k].Edge.enabled = false;
-            }
-
             var gear = Block(bar, "Ajustes", 70, false);
             MakeButton(gear, "Ajustes", 4, 15, 62, 62, 18, "gear", 36, null, 0, () => TogglePopup(Popup.Settings));
+        }
+
+        /// <summary>What the city produces against what it uses: power, water, sewage and waste.</summary>
+        void BuildResources(RectTransform bar)
+        {
+            const float itemWidth = 172;
+            var b = Block(bar, "Recursos", itemWidth * 4 + 16);
+            TextAt(b, 14, 8, 400, 24, 19, TextAnchor.MiddleLeft, UiKit.TextDim).text = "Producción / Consumo";
+            string[] icons = { "bolt", "water", "water", "trash" };
+            Color[] colors = { UiKit.Warn, new Color(.45f, .75f, 1f), new Color(.62f, .52f, .4f), new Color(.6f, .85f, .55f) };
+            for (int k = 0; k < 4; k++)
+            {
+                float x = 8 + k * itemWidth;
+                Icon(b, icons[k], x + 18, 58, 30, colors[k]);
+                resourceValues[k] = TextAt(b, x + 38, 40, itemWidth - 44, 36, 23, TextAnchor.MiddleLeft, Color.white, true);
+                FitOneLine(resourceValues[k], 14);
+            }
+        }
+
+        void ShowResource(int k, int produced, int used, string unit)
+        {
+            var t = resourceValues[k];
+            t.text = $"{N(produced)} / {N(used)} {unit}";
+            t.color = produced == 0 && used == 0 ? UiKit.TextDim : used > produced ? UiKit.Bad : used > produced * .85f ? UiKit.Warn : UiKit.Good;
         }
 
         RectTransform Block(RectTransform bar, string name, float width, bool divider = true)
@@ -489,7 +502,7 @@ namespace Horizonte.Presentation
 
         void BuildMinimap()
         {
-            var panel = Rect("Minimapa", safe, Vector2.zero, Vector2.zero, new Vector2(12, 12), new Vector2(236, 236), Vector2.zero);
+            var panel = Rect("Minimapa", wide, Vector2.zero, Vector2.zero, new Vector2(0, 10), new Vector2(206, 206), Vector2.zero);
             Panel(panel, UiKit.PanelColor, 18);
             var maskRt = Stretch("Máscara", panel, 8, 8, 8, 8);
             var maskImage = maskRt.gameObject.AddComponent<Image>();
@@ -526,14 +539,15 @@ namespace Horizonte.Presentation
                 mapTexture.Reinitialize(c.Width, c.Height);
                 mapPixels = new Color32[c.Width * c.Height];
             }
-            Color grass = new Color(.4f, .55f, .29f), forest = new Color(.22f, .38f, .18f), water = new Color(.2f, .44f, .66f);
+            // Land is kept dark and buildings bright so the city stands out at a glance.
+            Color grass = new Color(.3f, .42f, .23f), forest = new Color(.18f, .29f, .15f), water = new Color(.2f, .44f, .7f);
             for (int i = 0; i < mapPixels.Length; i++)
             {
                 var def = c.DefAt(i);
                 Color col;
                 if (def == null) col = c.Terrain[i] == Terrain.Water ? water : c.Terrain[i] == Terrain.Forest ? forest : grass;
                 else if (def.IsRoad) col = new Color(.86f, .87f, .9f);
-                else col = Tools.CategoryColor(def.Category);
+                else col = Color.Lerp(Tools.CategoryColor(def.Category), Color.white, c.Construction[c.Anchor[i]] > 0 ? .7f : .3f);
                 mapPixels[i] = col;
             }
             mapTexture.SetPixels32(mapPixels);
@@ -557,7 +571,7 @@ namespace Horizonte.Presentation
             var items = Tools.Bar;
             const float w = 96, h = 94, gap = 5;
             float width = items.Length * w + (items.Length - 1) * gap + 12;
-            bottomBar = Rect("Construcción", safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 12), new Vector2(width, h + 12), new Vector2(.5f, 0));
+            bottomBar = Rect("Construcción", wide, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 12), new Vector2(width, h + 12), new Vector2(.5f, 0));
             Panel(bottomBar, UiKit.PanelColor, 20);
             for (int k = 0; k < items.Length; k++)
             {
@@ -566,7 +580,7 @@ namespace Horizonte.Presentation
                 barButtons.Add((item, b));
             }
 
-            hintPanel = Rect("Indicación", safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 132), new Vector2(600, 50), new Vector2(.5f, 0));
+            hintPanel = Rect("Indicación", wide, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 132), new Vector2(600, 50), new Vector2(.5f, 0));
             Panel(hintPanel, UiKit.PanelColor, 25);
             hintText = Label(Stretch("Texto", hintPanel, 24, 0, 24, 0), 21, TextAnchor.MiddleCenter, Color.white);
             hintText.supportRichText = true;
@@ -601,13 +615,13 @@ namespace Horizonte.Presentation
             int index = Array.IndexOf(Tools.Bar, item);
             var button = barButtons[index].button.Root;
             float centre = button.anchoredPosition.x + button.sizeDelta.x * .5f - bottomBar.sizeDelta.x * .5f;
-            float available = safe.rect.width - 24;
+            float available = wide.rect.width - 8;
             float cw = Mathf.Min(190, (available - 8) / defs.Count - 8);
             const float ch = 168, top = 46;
             float flyWidth = defs.Count * (cw + 8) + 8;
-            float limit = Mathf.Max(0, safe.rect.width * .5f - 12 - flyWidth * .5f);
+            float limit = Mathf.Max(0, wide.rect.width * .5f - flyWidth * .5f);
             centre = Mathf.Clamp(centre, -limit, limit);
-            flyout = Rect("Menú " + item.Name, safe, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(centre, 128), new Vector2(flyWidth, ch + top + 8), new Vector2(.5f, 0));
+            flyout = Rect("Menú " + item.Name, wide, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(centre, 128), new Vector2(flyWidth, ch + top + 8), new Vector2(.5f, 0));
             Panel(flyout, UiKit.PanelColor, 18);
             TextAt(flyout, 16, 6, flyWidth - 32, 36, 22, TextAnchor.MiddleLeft, Color.white, true).text = Tools.CategoryName(category);
             var tint = Tools.CategoryColor(category);
@@ -897,6 +911,7 @@ namespace Horizonte.Presentation
                         AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);
                         AddCard("road", blue, "Calle conectada", street, streetColor);
                         if (def.Service != Service.None) AddRow("cross", new Color(1f, .6f, .6f), "Servicio", Catalog.ServiceName(def.Service), Color.white);
+                        if (def.Capacity > 0) AddRow("chart", blue, "Capacidad / uso", $"{N(def.Capacity)} / {N(c.UtilityDemand(def.Service))} {Catalog.UtilityUnit(def.Service)}", Color.white);
                         AddRow("bolt", UiKit.Warn, "Consumo eléctrico", $"{def.PowerUse} MW", Color.white);
                         if (def.PowerSupply > 0) AddRow("bolt", UiKit.Warn, "Produce", $"{def.PowerSupply} MW", Color.white);
                         if (def.Desirability != 0) AddRow("star", UiKit.Gold, "Atractivo alrededor", Signed(def.Desirability), def.Desirability > 0 ? UiKit.Good : UiKit.Bad);
@@ -941,7 +956,7 @@ namespace Horizonte.Presentation
 
         void BuildToast()
         {
-            toastPanel = Rect("Aviso", safe, new Vector2(.5f, 1), new Vector2(.5f, 1), new Vector2(0, -114), new Vector2(600, 56), new Vector2(.5f, 1));
+            toastPanel = Rect("Aviso", wide, new Vector2(.5f, 1), new Vector2(.5f, 1), new Vector2(0, -114), new Vector2(600, 56), new Vector2(.5f, 1));
             Panel(toastPanel, new Color(.36f, .09f, .09f, .94f), 18, new Color(1, .5f, .45f, .6f));
             Icon(toastPanel, "warning", 34, 28, 30, UiKit.Warn);
             toastText = TextAt(toastPanel, 60, 0, 520, 56, 22, TextAnchor.MiddleLeft, Color.white, true);
@@ -981,6 +996,10 @@ namespace Horizonte.Presentation
             safe.anchorMin = new Vector2(lastSafeArea.xMin / Screen.width, lastSafeArea.yMin / Screen.height);
             safe.anchorMax = new Vector2(lastSafeArea.xMax / Screen.width, lastSafeArea.yMax / Screen.height);
             safe.offsetMin = safe.offsetMax = Vector2.zero;
+            wide.anchorMin = new Vector2(0, safe.anchorMin.y);
+            wide.anchorMax = new Vector2(1, safe.anchorMax.y);
+            wide.offsetMin = new Vector2(WideMargin, 0);
+            wide.offsetMax = new Vector2(-WideMargin, 0);
         }
 
         public void Refresh()
@@ -1026,26 +1045,14 @@ namespace Horizonte.Presentation
                 moneySub.color = net >= 0 ? UiKit.Good : UiKit.Bad;
             }
 
-            if (c.PowerSupply == 0)
-            {
-                powerValue.text = "0 MW";
-                powerSub.text = "Sin centrales";
-                powerSub.color = UiKit.Bad;
-            }
-            else
-            {
-                float use = c.PowerDemand / (float)c.PowerSupply;
-                powerValue.text = $"{N(c.PowerDemand)} / {N(c.PowerSupply)} MW";
-                powerSub.text = use > 1 ? "No alcanza" : $"Uso {Mathf.RoundToInt(use * 100)} %";
-                powerSub.color = use > 1 ? UiKit.Bad : use > .85f ? UiKit.Warn : UiKit.Good;
-            }
+            ShowResource(0, c.PowerSupply, c.PowerDemand, "MW");
+            ShowResource(1, c.UtilitySupply(Service.Water), c.UtilityDemand(Service.Water), "m³");
+            ShowResource(2, c.UtilitySupply(Service.Sewage), c.UtilityDemand(Service.Sewage), "m³");
+            ShowResource(3, c.UtilitySupply(Service.Waste), c.UtilityDemand(Service.Waste), "kg");
 
             SetDemand(0, c.DemandResidential);
             SetDemand(1, c.DemandCommercial);
             SetDemand(2, c.DemandIndustrial);
-
-            dateText.text = $"{c.Day % City.DaysPerMonth + 1} {MonthNames[c.Month]}  ·  Año {c.Year}";
-            dayText.text = $"Día {N(c.Day + 1)}";
 
             RefreshGoals(c);
             RefreshAlerts(c);
@@ -1053,7 +1060,7 @@ namespace Horizonte.Presentation
             if (selected.x >= 0) RefreshInfo();
             if (Time.unscaledTime >= mapRefreshAt)
             {
-                mapRefreshAt = Time.unscaledTime + 1;
+                mapRefreshAt = Time.unscaledTime + .3f;
                 RefreshMinimap();
             }
         }
@@ -1065,14 +1072,8 @@ namespace Horizonte.Presentation
             bar.localScale = new Vector3(1, demand >= 0 ? 1 : -1, 1);
         }
 
-        public void SetSpeedHighlight(int s)
-        {
-            for (int i = 0; i < speedButtons.Length; i++)
-            {
-                speedButtons[i].Back.color = i == s ? UiKit.Accent : Color.clear;
-                speedButtons[i].Icon.color = i == s ? Color.white : UiKit.TextDim;
-            }
-        }
+        /// <summary>The clock runs at one steady pace; there are no speed buttons any more.</summary>
+        public void SetSpeedHighlight(int s) { }
 
         /// <summary>Opens a pop-up or the building menu of a category; used by the screenshot mode.</summary>
         public void Showcase(string what)
