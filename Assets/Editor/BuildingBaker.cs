@@ -172,6 +172,9 @@ namespace Horizonte.EditorTools
         {
             var c = m == null ? Color.gray : m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : m.color;
             var srgb = new Color(Mathf.LinearToGammaSpace(c.r), Mathf.LinearToGammaSpace(c.g), Mathf.LinearToGammaSpace(c.b));
+            // Textured materials (water, concrete panels, sheet metal) keep their overall tone: the palette has no room for the detail.
+            var map = m == null ? null : m.HasProperty("_BaseMap") ? m.GetTexture("_BaseMap") : m.mainTexture;
+            if (map != null) srgb *= Average(map);
             string n = m == null ? "" : m.name.ToLowerInvariant();
             float metallic = 0, smoothness = .2f;
             if (n.Contains("vidrio") || n.Contains("cristal") || n.Contains("acristal") || n.Contains("ventan"))
@@ -194,6 +197,25 @@ namespace Horizonte.EditorTools
                 Metallic = (byte)Mathf.RoundToInt(metallic * 255),
                 Smoothness = (byte)Mathf.RoundToInt(smoothness * 255),
             };
+        }
+
+        /// <summary>Mean colour of a texture, read through a small render target so it need not be readable.</summary>
+        static Color Average(Texture t)
+        {
+            var rt = RenderTexture.GetTemporary(16, 16, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            var previous = RenderTexture.active;
+            Graphics.Blit(t, rt);
+            RenderTexture.active = rt;
+            var read = new Texture2D(16, 16, TextureFormat.RGBA32, false);
+            read.ReadPixels(new Rect(0, 0, 16, 16), 0, 0);
+            RenderTexture.active = previous;
+            RenderTexture.ReleaseTemporary(rt);
+            Color sum = Color.clear;
+            foreach (var p in read.GetPixels()) sum += p;
+            UnityEngine.Object.DestroyImmediate(read);
+            sum /= 256;
+            sum.a = 1;
+            return sum;
         }
 
         static Vector2 Texel(int index) =>

@@ -203,13 +203,13 @@ namespace Horizonte.Simulation
 
             // Water, sanitation and waste.
             Serve("estacion_bombeo", "Estación de bombeo", Category.Water, Service.Water, 1200, 50, 1, 1, 1, 9);
-            Serve("planta_potabilizadora", "Planta potabilizadora", Category.Water, Service.Water, 8000, 280, 3, 3, 2, 22, 1000);
+            Serve("planta_potabilizadora", "Planta potabilizadora", Category.Water, Service.Water, 8000, 280, 2, 2, 2, 22, 1000);
             Serve("tanque_agua", "Tanque de almacenamiento", Category.Water, Service.Water, 3000, 90, 2, 2, 3, 13, 400);
             Serve("control_alcantarillado", "Red de alcantarillado", Category.Water, Service.Sewage, 3000, 110, 2, 2, 2, 15, 300);
-            Serve("planta_tratamiento", "Planta de tratamiento", Category.Water, Service.Sewage, 9000, 320, 4, 3, 2, 26, 1500, -10);
-            Serve("recoleccion_basura", "Centro de recolección de basura", Category.Water, Service.Waste, 2500, 100, 3, 2, 1, 15, 300, -8);
-            Serve("planta_reciclaje", "Planta de reciclaje", Category.Water, Service.Waste, 7000, 240, 3, 3, 2, 22, 1500, -5);
-            var waste = Serve("valorizacion_energetica", "Planta de valorización energética", Category.Water, Service.Waste, 15000, 420, 3, 3, 3, 24, 3000, -15);
+            Serve("planta_tratamiento", "Planta de tratamiento", Category.Water, Service.Sewage, 9000, 320, 2, 2, 2, 26, 1500, -10);
+            Serve("recoleccion_basura", "Centro de recolección de basura", Category.Water, Service.Waste, 2500, 100, 2, 2, 1, 15, 300, -8);
+            Serve("planta_reciclaje", "Planta de reciclaje", Category.Water, Service.Waste, 7000, 240, 2, 2, 2, 22, 1500, -5);
+            var waste = Serve("valorizacion_energetica", "Planta de valorización energética", Category.Water, Service.Waste, 15000, 420, 2, 2, 3, 24, 3000, -15);
             waste.PowerSupply = 150;
             waste.PowerReach = 8;
             waste.Summary = "Alcance 24 · 150 MW";
