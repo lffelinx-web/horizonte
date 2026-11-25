@@ -129,39 +129,26 @@ namespace Horizonte.EditorTools
                 QualitySettings.renderPipeline = pipeline;
             }
             QualitySettings.SetQualityLevel(current, false);
-            AddAmbientOcclusion();
+            RemoveAmbientOcclusion();
         }
 
-        /// <summary>Soft darkening where objects meet the ground and each other, sized for a city seen from above.</summary>
-        static void AddAmbientOcclusion()
+        /// <summary>
+        /// Screen-space ambient occlusion is left out: at a cost the phone can afford it showed as flickering grey blotches.
+        /// Removes it from renderers set up by earlier versions.
+        /// </summary>
+        static void RemoveAmbientOcclusion()
         {
             var renderer = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(RendererPath);
             if (renderer == null) throw new InvalidOperationException($"{RendererPath} is missing.");
-            var ao = renderer.rendererFeatures.Find(f => f is ScreenSpaceAmbientOcclusion) as ScreenSpaceAmbientOcclusion;
-            if (ao == null)
-            {
-                ao = ScriptableObject.CreateInstance<ScreenSpaceAmbientOcclusion>();
-                ao.name = "Oclusión ambiental";
-                AssetDatabase.AddObjectToAsset(ao, renderer);
-                renderer.rendererFeatures.Add(ao);
-                AssetDatabase.TryGetGUIDAndLocalFileIdentifier(ao, out _, out long id);
-                var data = new SerializedObject(renderer);
-                var map = data.FindProperty("m_RendererFeatureMap");
-                map.arraySize++;
-                map.GetArrayElementAtIndex(map.arraySize - 1).longValue = id;
-                data.ApplyModifiedPropertiesWithoutUndo();
-            }
-            var s = new SerializedObject(ao);
-            s.FindProperty("m_Settings.Intensity").floatValue = 1.4f;
-            s.FindProperty("m_Settings.Radius").floatValue = 1.6f;
-            s.FindProperty("m_Settings.Falloff").floatValue = 900;
-            s.FindProperty("m_Settings.DirectLightingStrength").floatValue = .3f;
-            s.FindProperty("m_Settings.Downsample").boolValue = true;
-            s.FindProperty("m_Settings.Samples").enumValueIndex = 2;
-            s.FindProperty("m_Settings.BlurQuality").enumValueIndex = 1;
-            s.ApplyModifiedPropertiesWithoutUndo();
-            ao.SetActive(true);
-            EditorUtility.SetDirty(ao);
+            var ao = renderer.rendererFeatures.Find(f => f is ScreenSpaceAmbientOcclusion);
+            if (ao == null) return;
+            int index = renderer.rendererFeatures.IndexOf(ao);
+            var data = new SerializedObject(renderer);
+            data.FindProperty("m_RendererFeatures").DeleteArrayElementAtIndex(index);
+            data.FindProperty("m_RendererFeatureMap").DeleteArrayElementAtIndex(index);
+            data.ApplyModifiedPropertiesWithoutUndo();
+            AssetDatabase.RemoveObjectFromAsset(ao);
+            UnityEngine.Object.DestroyImmediate(ao, true);
             EditorUtility.SetDirty(renderer);
             AssetDatabase.SaveAssets();
         }
