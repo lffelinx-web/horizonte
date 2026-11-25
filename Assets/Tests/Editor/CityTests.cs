@@ -137,7 +137,7 @@ namespace Horizonte.Tests
             city.Occupants[city.Index(8, 11)] = 320;
             city.Refresh();
             Assert.AreEqual(60, city.UtilitySupply(Service.Water));
-            Assert.AreEqual(1 + 64 + 4, city.UtilityDemand(Service.Water));
+            Assert.AreEqual(1 + 64 + 2, city.UtilityDemand(Service.Water));
             Assert.IsTrue(city.Covered(city.Index(5, 11), Service.Water));
             Assert.IsFalse(city.Covered(city.Index(8, 11), Service.Water));
         }

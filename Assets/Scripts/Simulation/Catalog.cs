@@ -190,15 +190,15 @@ namespace Horizonte.Simulation
             // A small, cheap generator so a new town can afford its first lights.
             var generator = Plant("generador", "Generador eléctrico", 800, 30, 1, 1, 1, 40, 7, 0, -8, 3);
             generator.Summary = "40 MW · barato de mantener";
-            Plant("central_termoelectrica", "Central termoeléctrica", 6000, 200, 3, 3, 3, 400, 12, 0, -35, 7);
-            Plant("subestacion", "Subestación eléctrica", 800, 20, 1, 1, 1, 0, 10);
-            Plant("planta_solar", "Planta solar", 5000, 40, 3, 3, 1, 120, 8, 200);
-            Plant("parque_eolico", "Parque eólico", 8000, 60, 4, 4, 1, 220, 10, 500);
-            var hydro = Plant("central_hidroelectrica", "Central hidroeléctrica", 20000, 300, 3, 3, 3, 900, 14, 2000);
+            Plant("central_termoelectrica", "Central termoeléctrica", 6000, 200, 2, 2, 3, 400, 12, 0, -35, 7);
+            Plant("subestacion", "Subestación eléctrica", 800, 20, 2, 2, 1, 0, 10);
+            Plant("planta_solar", "Planta solar", 5000, 40, 2, 2, 1, 120, 8, 200);
+            Plant("parque_eolico", "Parque eólico", 8000, 60, 2, 2, 1, 220, 10, 500);
+            var hydro = Plant("central_hidroelectrica", "Central hidroeléctrica", 20000, 300, 2, 2, 3, 900, 14, 2000);
             hydro.NeedsWater = true;
             hydro.Summary = "900 MW · junto al río";
             Plant("sistema_baterias", "Sistema de baterías", 4000, 50, 2, 2, 1, 100, 6, 1000);
-            Plant("central_nuclear", "Central nuclear", 60000, 1500, 5, 4, 4, 3000, 20, 8000, -30, 8);
+            Plant("central_nuclear", "Central nuclear", 60000, 1500, 2, 2, 4, 3000, 20, 8000, -30, 8);
             Plant("red_inteligente", "Centro de red inteligente", 15000, 300, 2, 2, 3, 300, 16, 4000);
 
             // Water, sanitation and waste.
