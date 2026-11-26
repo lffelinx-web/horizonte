@@ -103,9 +103,11 @@ namespace Horizonte.Simulation
                 int i = city.Index(x, y);
                 if (city.Building[i] == Catalog.None || city.Anchor[i] >= 0) continue;
                 var def = Catalog.Get(city.Building[i]);
+                // The south-west corner is the anchor and keeps the rotation, which tells how a rectangular footprint lies.
+                var (w, h) = City.Footprint(def, (city.Rotation[i] & 1) == 1);
                 bool fits = true;
-                for (int dy = 0; dy < def.Height && fits; dy++)
-                for (int dx = 0; dx < def.Width && fits; dx++)
+                for (int dy = 0; dy < h && fits; dy++)
+                for (int dx = 0; dx < w && fits; dx++)
                     fits = city.InBounds(x + dx, y + dy) && city.Building[city.Index(x + dx, y + dy)] == def.Id && city.Anchor[city.Index(x + dx, y + dy)] < 0;
                 if (!fits)
                 {
@@ -113,8 +115,8 @@ namespace Horizonte.Simulation
                     city.Occupants[i] = 0;
                     continue;
                 }
-                for (int dy = 0; dy < def.Height; dy++)
-                for (int dx = 0; dx < def.Width; dx++)
+                for (int dy = 0; dy < h; dy++)
+                for (int dx = 0; dx < w; dx++)
                     city.Anchor[city.Index(x + dx, y + dy)] = i;
             }
         }

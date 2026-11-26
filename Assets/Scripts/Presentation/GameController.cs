@@ -167,7 +167,7 @@ namespace Horizonte.Presentation
             for (int i = 0; i < City.Building.Length; i++)
             {
                 if (City.Anchor[i] != i || !pick(i)) continue;
-                int w = City.DefAt(i).Width, h = City.DefAt(i).Height;
+                var (w, h) = City.Size(i);
                 Rig.Focus = new Vector3((i % City.Width + w * .5f) * CityView.TileSize, 0, (i / City.Width + h * .5f) * CityView.TileSize);
                 Rig.Yaw = 0;
                 Rig.Distance = distance;
@@ -191,7 +191,8 @@ namespace Horizonte.Presentation
                 {
                     var def = City.DefAt(i);
                     if (City.Anchor[i] != i || def == null || def.IsRoad) continue;
-                    float size = Mathf.Max(def.Width, def.Height) * CityView.TileSize;
+                    var (sw, sh) = City.Size(i);
+                    float size = Mathf.Max(sw, sh) * CityView.TileSize;
                     yield return CloseUp(folder, $"vitrina_{++shot:00}.png", j => j == i, size * 1.6f + 30);
                 }
                 Application.Quit();

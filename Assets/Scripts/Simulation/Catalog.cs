@@ -160,11 +160,11 @@ namespace Horizonte.Simulation
 
             // Housing.
             Home("casa_basica", "Casa básica", 300, 1, 1, 1, 4);
-            Home("casa_ampliada", "Casa ampliada", 550, 1, 1, 2, 6);
-            Home("duplex", "Dúplex", 800, 1, 1, 2, 10, 40);
+            Home("casa_ampliada", "Casa ampliada", 550, 1, 2, 2, 6);
+            Home("duplex", "Dúplex", 800, 2, 1, 2, 10, 40);
             Home("apartamentos", "Apartamentos", 3500, 2, 2, 4, 48, 150);
-            Home("conjunto_residencial", "Conjunto residencial", 9500, 4, 4, 4, 150, 500);
-            Home("torre_residencial", "Torre residencial", 16000, 3, 3, 15, 320, 1200);
+            Home("conjunto_residencial", "Conjunto residencial", 9500, 3, 3, 4, 150, 500);
+            Home("torre_residencial", "Torre residencial", 16000, 2, 2, 12, 320, 1200);
 
             // Commerce and offices.
             Work("tienda_abarrotes", "Tienda de abarrotes", Category.Commerce, 450, 2, 2, 1, 6, false);

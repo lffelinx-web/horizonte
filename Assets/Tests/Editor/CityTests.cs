@@ -222,6 +222,29 @@ namespace Horizonte.Tests
         }
 
         [Test]
+        public void RectangularBuildingsTurnToFaceAStreetRunningNorth()
+        {
+            var city = Flat();
+            city.PlaceMany(Catalog.Road, City.Line(15, 11, 15, 20), out _);
+            ushort duplex = Id("duplex");
+            bool turned = city.ChooseTurn(duplex, 16, 14, out int x, out int y);
+            Assert.IsTrue(turned);
+            Assert.AreEqual(PlaceResult.Ok, city.Place(duplex, x, y, turned));
+            int anchor = city.Index(x, y);
+            Assert.AreEqual(1, city.Rotation[anchor], "faces west, toward the street");
+            Assert.AreEqual((1, 2), city.Size(anchor));
+            Assert.AreEqual(anchor, city.Anchor[city.Index(x, y + 1)]);
+            Assert.AreEqual(Catalog.None, city.Building[city.Index(x + 1, y)]);
+
+            var copy = CitySave.From(city).ToCity();
+            CollectionAssert.AreEqual(city.Anchor, copy.Anchor);
+
+            Assert.IsTrue(city.Bulldoze(x, y + 1));
+            Assert.AreEqual(Catalog.None, city.Building[city.Index(x, y)]);
+            Assert.AreEqual(Catalog.None, city.Building[city.Index(x, y + 1)]);
+        }
+
+        [Test]
         public void LevelsFollowPopulation()
         {
             Assert.AreEqual(1, Progress.Level(0));

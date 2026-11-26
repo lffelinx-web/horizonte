@@ -417,7 +417,7 @@ namespace Horizonte.Presentation
             }
             var def = city.DefAt(i);
             if (def == null || def.IsRoad || city.Anchor[i] != i) return;
-            int w = def.Width, h = def.Height;
+            var (w, h) = city.Size(i);
             var go = factory.Create(def, city.Rotation[i], Hash(i % city.Width, i / city.Width));
             if (go == null) return;
             int x = i % city.Width, y = i / city.Width;

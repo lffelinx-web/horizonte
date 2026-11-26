@@ -33,8 +33,6 @@ namespace Horizonte.Presentation
 
         public GameObject Create(BuildingDef def, int rotation, uint seed)
         {
-            // Footprints that are not square can only turn half way round.
-            if (def.Width != def.Height) rotation &= 2;
             GameObject go;
             if (models.TryGetValue(def.Model, out var list))
             {

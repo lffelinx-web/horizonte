@@ -20,6 +20,7 @@ namespace Horizonte.EditorTools
         const string GeneratedFolder = "Assets/Generated/Buildings";
         const string PalettePath = GeneratedFolder + "/Paleta.png";
         const string GlossPath = GeneratedFolder + "/Paleta_brillo.png";
+        const string GlowPath = GeneratedFolder + "/Paleta_luz.png";
         const string MaterialPath = GeneratedFolder + "/Edificios.mat";
         const int PaletteSize = 32;
 
@@ -33,9 +34,11 @@ namespace Horizonte.EditorTools
         {
             public Color32 Color;
             public byte Metallic, Smoothness;
+            /// <summary>Lamps and lit interiors give off their own light.</summary>
+            public bool Glows;
 
-            public bool Equals(Swatch o) => Color.r == o.Color.r && Color.g == o.Color.g && Color.b == o.Color.b && Metallic == o.Metallic && Smoothness == o.Smoothness;
-            public override int GetHashCode() => (Color.r << 24) ^ (Color.g << 16) ^ (Color.b << 8) ^ (Metallic << 4) ^ Smoothness;
+            public bool Equals(Swatch o) => Color.r == o.Color.r && Color.g == o.Color.g && Color.b == o.Color.b && Metallic == o.Metallic && Smoothness == o.Smoothness && Glows == o.Glows;
+            public override int GetHashCode() => (Color.r << 24) ^ (Color.g << 16) ^ (Color.b << 8) ^ (Metallic << 4) ^ Smoothness ^ (Glows ? 1 << 30 : 0);
         }
 
         [MenuItem("Horizonte/Preparar edificios")]
@@ -172,31 +175,71 @@ namespace Horizonte.EditorTools
         {
             var c = m == null ? Color.gray : m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : m.color;
             var srgb = new Color(Mathf.LinearToGammaSpace(c.r), Mathf.LinearToGammaSpace(c.g), Mathf.LinearToGammaSpace(c.b));
-            // Textured materials (water, concrete panels, sheet metal) keep their overall tone: the palette has no room for the detail.
+            // Textured materials (water, concrete panels, sheet metal) keep their overall tone: the palette has no room for the
+            // detail. Blender leaves the unused base colour of a textured material at a neutral grey, so the texture alone counts.
             var map = m == null ? null : m.HasProperty("_BaseMap") ? m.GetTexture("_BaseMap") : m.mainTexture;
-            if (map != null) srgb *= Average(map);
+            if (map != null) srgb = Average(map);
             string n = m == null ? "" : m.name.ToLowerInvariant();
             float metallic = 0, smoothness = .2f;
-            if (n.Contains("vidrio") || n.Contains("cristal") || n.Contains("acristal") || n.Contains("ventan"))
+            bool glass = n.Contains("vidrio") || n.Contains("cristal") || n.Contains("acristal") || n.Contains("ventan");
+            bool metal = !glass && (n.Contains("aluminio") || n.Contains("herraje") || n.Contains("acero") || n.Contains("metal") || n.Contains("inox") || n.Contains("cromo") || n.Contains("latón") || n.Contains("laton"));
+            bool lawn = n.Contains("césped") || n.Contains("cesped") || n.Contains("pasto");
+            bool foliage = lawn || n.Contains("follaje") || n.Contains("hoja");
+            if (glass)
             {
                 metallic = .1f;
                 smoothness = .78f;
             }
-            else if (n.Contains("aluminio") || n.Contains("herraje") || n.Contains("acero") || n.Contains("metal") || n.Contains("inox") || n.Contains("cromo"))
+            else if (metal)
             {
                 metallic = .55f;
                 smoothness = .55f;
             }
-            else if (n.Contains("follaje") || n.Contains("hoja") || n.Contains("césped") || n.Contains("cesped") || n.Contains("pasto"))
+            else if (foliage)
             {
                 smoothness = .08f;
             }
+            if (lawn) srgb = LawnColour;
+            else if (!glass && !metal && !foliage) srgb = Brighten(srgb, n);
             return new Swatch
             {
                 Color = srgb,
                 Metallic = (byte)Mathf.RoundToInt(metallic * 255),
                 Smoothness = (byte)Mathf.RoundToInt(smoothness * 255),
+                Glows = !glass && IsLight(m, n),
             };
+        }
+
+        /// <summary>Lawns in the models match the grass of the map, so a lot blends into the ground around it.</summary>
+        static readonly Color LawnColour = new Color(.525f, .678f, .361f);
+
+        /// <summary>Flat roofs, white or light grey like most in Mexico; they are what the camera sees most.</summary>
+        static readonly Color RoofColour = new Color(.86f, .85f, .81f);
+
+        /// <summary>
+        /// The game has no relief maps nor the studio light of the renders, so walls read darker than they were drawn.
+        /// Light colours (stucco, concrete, stone) are lifted; dark ones chosen on purpose (wood, asphalt) stay.
+        /// </summary>
+        static Color Brighten(Color c, string name)
+        {
+            if (name.Contains("impermeab") || name.Contains("azotea") || name.Contains("techo") || name.Contains("cubierta") || name.Contains("losa"))
+                return Color.Lerp(c, RoofColour, .65f);
+            Color.RGBToHSV(c, out float h, out float s, out float v);
+            if (v < .3f) return c;
+            float lift = Mathf.InverseLerp(.3f, .45f, v);
+            v = Mathf.Min(.95f, v * (1 + .2f * lift));
+            var result = Color.HSVToRGB(h, s, v);
+            result.a = 1;
+            return result;
+        }
+
+        /// <summary>Lamps and lit windows: an emissive material in the FBX, or one named like a light.</summary>
+        static bool IsLight(Material m, string name)
+        {
+            if (name.Contains("lámpara") || name.Contains("lampara") || name.Contains("luz") || name.Contains("ilumin") || name.Contains("foco") || name.Contains("emis"))
+                return true;
+            if (m == null || !m.HasProperty("_EmissionColor") || !m.IsKeywordEnabled("_EMISSION")) return false;
+            return m.GetColor("_EmissionColor").maxColorComponent > .05f;
         }
 
         /// <summary>Mean colour of a texture, read through a small render target so it need not be readable.</summary>
@@ -225,14 +268,17 @@ namespace Horizonte.EditorTools
         {
             var colors = new Color32[PaletteSize * PaletteSize];
             var gloss = new Color32[PaletteSize * PaletteSize];
+            var glow = new Color32[PaletteSize * PaletteSize];
             for (int i = 0; i < colors.Length; i++)
             {
                 var s = i < palette.Count ? palette[i] : new Swatch { Color = new Color32(128, 128, 128, 255), Smoothness = 50 };
                 colors[i] = new Color32(s.Color.r, s.Color.g, s.Color.b, 255);
                 gloss[i] = new Color32(s.Metallic, s.Metallic, s.Metallic, s.Smoothness);
+                glow[i] = s.Glows ? new Color32(s.Color.r, s.Color.g, s.Color.b, 255) : new Color32(0, 0, 0, 255);
             }
             SavePng(PalettePath, colors, true);
             SavePng(GlossPath, gloss, false);
+            SavePng(GlowPath, glow, true);
         }
 
         static void SavePng(string path, Color32[] pixels, bool srgb)
@@ -267,6 +313,11 @@ namespace Horizonte.EditorTools
             m.EnableKeyword("_METALLICSPECGLOSSMAP");
             m.SetFloat("_Smoothness", 1);
             m.SetFloat("_SmoothnessTextureChannel", 0);
+            // Lamps and lit windows glow softly by day; the bloom picks up the brightest.
+            m.SetTexture("_EmissionMap", AssetDatabase.LoadAssetAtPath<Texture2D>(GlowPath));
+            m.SetColor("_EmissionColor", new Color(1.4f, 1.4f, 1.4f));
+            m.EnableKeyword("_EMISSION");
+            m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
             m.enableInstancing = true;
             EditorUtility.SetDirty(m);
             return m;

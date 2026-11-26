@@ -239,9 +239,9 @@ namespace Horizonte.EditorTools
 
             RenderSettings.skybox = null;
             RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(.56f, .66f, .82f);
-            RenderSettings.ambientEquatorColor = new Color(.5f, .55f, .52f);
-            RenderSettings.ambientGroundColor = new Color(.32f, .3f, .26f);
+            RenderSettings.ambientSkyColor = new Color(.66f, .72f, .82f);
+            RenderSettings.ambientEquatorColor = new Color(.63f, .62f, .57f);
+            RenderSettings.ambientGroundColor = new Color(.42f, .39f, .33f);
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
             RenderSettings.fogDensity = .0013f;

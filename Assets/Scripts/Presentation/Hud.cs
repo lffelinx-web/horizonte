@@ -514,8 +514,9 @@ namespace Horizonte.Presentation
                 if (c.Powered[i]) continue;
                 unpowered++;
                 bool reached = false;
-                for (int dy = 0; dy < def.Height && !reached; dy++)
-                for (int dx = 0; dx < def.Width && !reached; dx++)
+                var (fw, fh) = c.Size(i);
+                for (int dy = 0; dy < fh && !reached; dy++)
+                for (int dx = 0; dx < fw && !reached; dx++)
                     reached = c.PowerCover[i + dy * c.Width + dx];
                 if (!reached) outOfReach++;
             }
@@ -962,7 +963,8 @@ namespace Horizonte.Presentation
                     AddRow("level", UiKit.Warn, "En construcción", $"{(total - left) * 100 / total} %  ·  faltan {left} {(left == 1 ? "día" : "días")}", UiKit.Warn);
                 }
                 else if (!def.IsRoad && !working) AddRow("warning", UiKit.Bad, "No funciona", !c.Served[a] ? "sin calle conectada" : "sin electricidad", UiKit.Bad);
-                game.View.SetSelection(a % c.Width, a / c.Width, def.Width, def.Height);
+                var (sw, sh) = c.Size(a);
+                game.View.SetSelection(a % c.Width, a / c.Width, sw, sh);
             }
 
             // Stack the sections that are in use.

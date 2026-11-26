@@ -23,6 +23,8 @@ namespace Horizonte.Presentation
         bool pressing, dragged, waitForRelease;
         Vector2 pressPos, lastPos;
         Vector2Int startTile, currentTile;
+        // Whether a rectangular building lies across (facing west or east) so its front meets the street.
+        bool turned;
 
         bool gesturing;
         Vector2 gestureCentre;
@@ -208,6 +210,7 @@ namespace Horizonte.Presentation
         void BuildShape()
         {
             shape.Clear();
+            turned = false;
             switch (Tools.ShapeOf(Tool))
             {
                 case Tools.Shape.Line: shape.AddRange(City.Line(startTile.x, startTile.y, currentTile.x, currentTile.y)); break;
@@ -219,11 +222,11 @@ namespace Horizonte.Presentation
             }
         }
 
-        /// <summary>Buildings bigger than one tile are centred under the finger.</summary>
+        /// <summary>Buildings bigger than one tile are centred under the finger, turned toward the street.</summary>
         Vector2Int SingleAnchor()
         {
-            var def = Tool.Def;
-            return new Vector2Int(currentTile.x - (def.Width - 1) / 2, currentTile.y - (def.Height - 1) / 2);
+            turned = game.City.ChooseTurn(Tool.Building, currentTile.x, currentTile.y, out int x, out int y);
+            return new Vector2Int(x, y);
         }
 
         void UpdatePreview()
@@ -250,11 +253,12 @@ namespace Horizonte.Presentation
                     continue;
                 }
                 var def = Catalog.Get(type);
-                var result = city.CanPlace(type, x, y);
-                int cost = city.PlacementCost(type, x, y);
+                var result = city.CanPlace(type, x, y, turned);
+                int cost = city.PlacementCost(type, x, y, turned);
                 bool ok = (result == PlaceResult.Ok || result == PlaceResult.NoMoney) && total + cost <= budget;
                 if (ok) { total += cost; count++; }
-                float w = def.Width * CityView.TileSize - 2 * inset, d = def.Height * CityView.TileSize - 2 * inset;
+                var (fw, fh) = City.Footprint(def, turned);
+                float w = fw * CityView.TileSize - 2 * inset, d = fh * CityView.TileSize - 2 * inset;
                 preview.Flat(ok ? 0 : 1, x0, z0, x0 + w, z0 + d, lift);
             }
             previewFilter.sharedMesh = preview.ToMesh(previewFilter.sharedMesh);
@@ -279,7 +283,7 @@ namespace Horizonte.Presentation
                 if (removed == 0) hud.Toast("No hay nada que demoler ahí");
                 return;
             }
-            int placed = city.PlaceMany(Tool.Building, shape, out var problem);
+            int placed = city.PlaceMany(Tool.Building, shape, out var problem, turned);
             if (problem != PlaceResult.Ok && (placed == 0 || problem == PlaceResult.NoMoney)) hud.Toast(Message(problem));
         }
 

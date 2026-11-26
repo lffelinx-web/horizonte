@@ -115,6 +115,45 @@ namespace Horizonte.Simulation
         public int Index(int x, int y) => y * Width + x;
         public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < Width && y < Height;
         public BuildingDef DefAt(int i) => Catalog.Get(Building[i]);
+
+        /// <summary>
+        /// Footprint of a building on the map. A rectangular one turned to face west or east (odd rotation) lies across:
+        /// its width runs north-south.
+        /// </summary>
+        public static (int w, int h) Footprint(BuildingDef def, bool turned) =>
+            turned && def.Width != def.Height ? (def.Height, def.Width) : (def.Width, def.Height);
+
+        /// <summary>Footprint of the building anchored at a tile.</summary>
+        public (int w, int h) Size(int anchor)
+        {
+            var def = DefAt(anchor);
+            return def == null ? (1, 1) : Footprint(def, (Rotation[anchor] & 1) == 1);
+        }
+
+        /// <summary>
+        /// Where a building centred on a tile goes, and whether it should lie across. Square ones never need to;
+        /// rectangular ones turn so their front (the side along their width) meets a street.
+        /// </summary>
+        public bool ChooseTurn(ushort id, int cx, int cy, out int ax, out int ay)
+        {
+            var def = Catalog.Get(id);
+            bool best = false;
+            int bestScore = -1;
+            ax = cx; ay = cy;
+            if (def == null) return false;
+            for (int t = 0; t < (def.Width != def.Height ? 2 : 1); t++)
+            {
+                bool turned = t == 1;
+                var (w, h) = Footprint(def, turned);
+                int x = cx - (w - 1) / 2, y = cy - (h - 1) / 2;
+                var r = CanPlace(id, x, y, turned);
+                bool fits = r == PlaceResult.Ok || r == PlaceResult.NoMoney;
+                bool front = FrontRoad(x, y, w, h, turned) >= 0;
+                int score = (fits ? 2 : 0) + (front ? 1 : 0);
+                if (score > bestScore) { bestScore = score; best = turned; ax = x; ay = y; }
+            }
+            return best;
+        }
         public bool IsRoad(int x, int y) => InBounds(x, y) && (Catalog.Get(Building[Index(x, y)])?.IsRoad ?? false);
         public bool Covered(int i, Service s) => (Coverage[i] & (1 << (int)s)) != 0;
 
@@ -138,13 +177,14 @@ namespace Horizonte.Simulation
 
         // ---------------------------------------------------------------- building
 
-        public PlaceResult CanPlace(ushort id, int x, int y)
+        public PlaceResult CanPlace(ushort id, int x, int y, bool turned = false)
         {
             var def = Catalog.Get(id);
             if (def == null) return PlaceResult.Occupied;
+            var (fw, fh) = Footprint(def, turned);
             if (!IgnoreRequirements && Population < def.MinPopulation) return PlaceResult.Locked;
-            for (int dy = 0; dy < def.Height; dy++)
-            for (int dx = 0; dx < def.Width; dx++)
+            for (int dy = 0; dy < fh; dy++)
+            for (int dx = 0; dx < fw; dx++)
             {
                 if (!InBounds(x + dx, y + dy)) return PlaceResult.OutOfBounds;
                 int i = Index(x + dx, y + dy);
@@ -156,10 +196,10 @@ namespace Horizonte.Simulation
                 bool reroad = def.IsRoad && !def.Bridge && there.IsRoad && !there.Bridge && Building[i] != id;
                 if (!reroad) return PlaceResult.Occupied;
             }
-            if (!def.IsRoad && !Touches(x, y, def.Width, def.Height, IsRoad)) return PlaceResult.NoRoad;
-            if (def.NeedsWater && !Touches(x, y, def.Width, def.Height, (tx, ty) => InBounds(tx, ty) && Terrain[Index(tx, ty)] == Simulation.Terrain.Water))
+            if (!def.IsRoad && !Touches(x, y, fw, fh, IsRoad)) return PlaceResult.NoRoad;
+            if (def.NeedsWater && !Touches(x, y, fw, fh, (tx, ty) => InBounds(tx, ty) && Terrain[Index(tx, ty)] == Simulation.Terrain.Water))
                 return PlaceResult.NeedsWater;
-            return Money >= PlacementCost(id, x, y) ? PlaceResult.Ok : PlaceResult.NoMoney;
+            return Money >= PlacementCost(id, x, y, turned) ? PlaceResult.Ok : PlaceResult.NoMoney;
         }
 
         /// <summary>Whether any tile just outside the footprint passes the test.</summary>
@@ -171,25 +211,28 @@ namespace Horizonte.Simulation
         }
 
         /// <summary>Price of building here, including clearing the forest under it.</summary>
-        public int PlacementCost(ushort id, int x, int y)
+        public int PlacementCost(ushort id, int x, int y, bool turned = false)
         {
             var def = Catalog.Get(id);
             int cost = def.Cost;
-            for (int dy = 0; dy < def.Height; dy++)
-            for (int dx = 0; dx < def.Width; dx++)
+            var (fw, fh) = Footprint(def, turned);
+            for (int dy = 0; dy < fh; dy++)
+            for (int dx = 0; dx < fw; dx++)
                 if (InBounds(x + dx, y + dy) && Terrain[Index(x + dx, y + dy)] == Simulation.Terrain.Forest) cost += Catalog.ClearForestCost;
             return cost;
         }
 
-        public PlaceResult Place(ushort id, int x, int y)
+        public PlaceResult Place(ushort id, int x, int y, bool turned = false)
         {
-            var result = CanPlace(id, x, y);
+            var result = CanPlace(id, x, y, turned);
             if (result != PlaceResult.Ok) return result;
             var def = Catalog.Get(id);
-            Money -= PlacementCost(id, x, y);
+            Money -= PlacementCost(id, x, y, turned);
             int anchor = Index(x, y);
-            for (int dy = 0; dy < def.Height; dy++)
-            for (int dx = 0; dx < def.Width; dx++)
+            var (fw, fh) = Footprint(def, turned);
+            turned &= def.Width != def.Height;
+            for (int dy = 0; dy < fh; dy++)
+            for (int dx = 0; dx < fw; dx++)
             {
                 int i = Index(x + dx, y + dy);
                 if (Terrain[i] == Simulation.Terrain.Forest) Terrain[i] = Simulation.Terrain.Grass;
@@ -198,7 +241,7 @@ namespace Horizonte.Simulation
                 Occupants[i] = 0;
                 MarkChanged(i);
             }
-            Rotation[anchor] = FacingRoad(x, y, def.Width, def.Height);
+            Rotation[anchor] = Facing(x, y, fw, fh, def.Width != def.Height, turned);
             Construction[anchor] = (byte)Catalog.BuildDays(def);
             if (def.IsRoad) RefreshRoadNeighbours(x, y);
             UpdateNetworks();
@@ -207,13 +250,13 @@ namespace Horizonte.Simulation
         }
 
         /// <summary>Places on every tile in order; stops when money runs out. Returns how many were placed.</summary>
-        public int PlaceMany(ushort id, IEnumerable<(int x, int y)> tiles, out PlaceResult firstProblem)
+        public int PlaceMany(ushort id, IEnumerable<(int x, int y)> tiles, out PlaceResult firstProblem, bool turned = false)
         {
             firstProblem = PlaceResult.Ok;
             int placed = 0;
             foreach (var (x, y) in tiles)
             {
-                var r = Place(id, x, y);
+                var r = Place(id, x, y, turned);
                 if (r == PlaceResult.Ok) placed++;
                 else
                 {
@@ -241,8 +284,9 @@ namespace Horizonte.Simulation
             Money -= Catalog.BulldozeCost;
             var def = DefAt(i);
             int anchor = Anchor[i], ax = anchor % Width, ay = anchor / Width;
-            for (int dy = 0; dy < def.Height; dy++)
-            for (int dx = 0; dx < def.Width; dx++)
+            var (fw, fh) = Size(anchor);
+            for (int dy = 0; dy < fh; dy++)
+            for (int dx = 0; dx < fw; dx++)
             {
                 int j = Index(ax + dx, ay + dy);
                 Building[j] = Catalog.None;
@@ -273,7 +317,9 @@ namespace Horizonte.Simulation
                 int anchor = Anchor[j];
                 var def = DefAt(j);
                 if (def.IsRoad) continue;
-                byte facing = FacingRoad(anchor % Width, anchor / Width, def.Width, def.Height);
+                var (fw, fh) = Size(anchor);
+                bool rectangular = def.Width != def.Height;
+                byte facing = Facing(anchor % Width, anchor / Width, fw, fh, rectangular, (Rotation[anchor] & 1) == 1);
                 if (facing == Rotation[anchor]) continue;
                 Rotation[anchor] = facing;
                 MarkChanged(anchor);
@@ -284,14 +330,29 @@ namespace Horizonte.Simulation
         public static readonly int[] DX = { 0, -1, 0, 1 };
         public static readonly int[] DY = { -1, 0, 1, 0 };
 
-        /// <summary>Picks the side of the footprint that touches a road, south first.</summary>
-        byte FacingRoad(int x, int y, int w, int h)
+        /// <summary>
+        /// Side of the footprint that touches a road, south first, or -1. A rectangular building may only face along
+        /// its front and back: south or north when it lies along, west or east when it lies across.
+        /// </summary>
+        int FrontRoad(int x, int y, int w, int h, bool? across = null)
         {
-            for (int k = 0; k < w; k++) if (IsRoad(x + k, y - 1)) return 0;
-            for (int k = 0; k < h; k++) if (IsRoad(x - 1, y + k)) return 1;
-            for (int k = 0; k < w; k++) if (IsRoad(x + k, y + h)) return 2;
-            for (int k = 0; k < h; k++) if (IsRoad(x + w, y + k)) return 3;
-            return Rotation[Index(x, y)];
+            bool ns = across != true, we = across != false;
+            if (ns) for (int k = 0; k < w; k++) if (IsRoad(x + k, y - 1)) return 0;
+            if (we) for (int k = 0; k < h; k++) if (IsRoad(x - 1, y + k)) return 1;
+            if (ns) for (int k = 0; k < w; k++) if (IsRoad(x + k, y + h)) return 2;
+            if (we) for (int k = 0; k < h; k++) if (IsRoad(x + w, y + k)) return 3;
+            return -1;
+        }
+
+        /// <summary>Which way a building turns: toward a road it touches, keeping its current way if there is none.</summary>
+        byte Facing(int x, int y, int w, int h, bool rectangular, bool across)
+        {
+            int side = FrontRoad(x, y, w, h, rectangular ? across : (bool?)null);
+            if (side >= 0) return (byte)side;
+            byte current = Rotation[Index(x, y)];
+            if (!rectangular) return current;
+            // Keep the parity that matches how the footprint lies.
+            return (byte)(((current & 1) == 1) == across ? current : across ? 1 : 0);
         }
 
         /// <summary>Buildings of one model of the catalog (each counted once).</summary>
@@ -359,7 +420,8 @@ namespace Horizonte.Simulation
                 if (Anchor[i] != i) continue;
                 var def = DefAt(i);
                 if (def == null || def.IsRoad) continue;
-                bool served = Touches(i % Width, i / Width, def.Width, def.Height, (tx, ty) => InBounds(tx, ty) && RoadConnected[Index(tx, ty)]);
+                var (sw, sh) = Size(i);
+                bool served = Touches(i % Width, i / Width, sw, sh, (tx, ty) => InBounds(tx, ty) && RoadConnected[Index(tx, ty)]);
                 if (served) Fill(i, Served, true);
             }
         }
@@ -375,10 +437,10 @@ namespace Horizonte.Simulation
         /// <summary>Sets a flag on every tile of the building anchored at a tile.</summary>
         void Fill(int anchor, bool[] layer, bool value)
         {
-            var def = DefAt(anchor);
+            var (w, h) = Size(anchor);
             int ax = anchor % Width, ay = anchor / Width;
-            for (int dy = 0; dy < def.Height; dy++)
-            for (int dx = 0; dx < def.Width; dx++)
+            for (int dy = 0; dy < h; dy++)
+            for (int dx = 0; dx < w; dx++)
                 layer[Index(ax + dx, ay + dy)] = value;
         }
 
@@ -463,10 +525,10 @@ namespace Horizonte.Simulation
 
         bool Any(int anchor, bool[] layer)
         {
-            var def = DefAt(anchor);
+            var (w, h) = Size(anchor);
             int ax = anchor % Width, ay = anchor / Width;
-            for (int dy = 0; dy < def.Height; dy++)
-            for (int dx = 0; dx < def.Width; dx++)
+            for (int dy = 0; dy < h; dy++)
+            for (int dx = 0; dx < w; dx++)
                 if (layer[Index(ax + dx, ay + dy)]) return true;
             return false;
         }
@@ -474,19 +536,19 @@ namespace Horizonte.Simulation
         /// <summary>Distance in tiles between the centres of two buildings.</summary>
         float Distance(int a, int b)
         {
-            var da = DefAt(a);
-            var db = DefAt(b);
-            float ax = a % Width + da.Width * .5f, ay = a / Width + da.Height * .5f;
-            float bx = b % Width + db.Width * .5f, by = b / Width + db.Height * .5f;
+            var (aw, ah) = Size(a);
+            var (bw, bh) = Size(b);
+            float ax = a % Width + aw * .5f, ay = a / Width + ah * .5f;
+            float bx = b % Width + bw * .5f, by = b / Width + bh * .5f;
             return (float)Math.Sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
         }
 
         /// <summary>Calls back for every tile within a radius of the building's edge.</summary>
         void StampCircle(int anchor, int radius, Action<int> stamp)
         {
-            var def = DefAt(anchor);
-            float cx = anchor % Width + (def.Width - 1) * .5f, cy = anchor / Width + (def.Height - 1) * .5f;
-            float reach = radius + Math.Max(def.Width, def.Height) * .5f;
+            var (w, h) = Size(anchor);
+            float cx = anchor % Width + (w - 1) * .5f, cy = anchor / Width + (h - 1) * .5f;
+            float reach = radius + Math.Max(w, h) * .5f;
             int x0 = Math.Max(0, (int)Math.Floor(cx - reach)), x1 = Math.Min(Width - 1, (int)Math.Ceiling(cx + reach));
             int y0 = Math.Max(0, (int)Math.Floor(cy - reach)), y1 = Math.Min(Height - 1, (int)Math.Ceiling(cy + reach));
             for (int y = y0; y <= y1; y++)
@@ -509,7 +571,8 @@ namespace Horizonte.Simulation
                 if (Anchor[i] != i) continue;
                 var def = DefAt(i);
                 if (def == null || def.Desirability == 0 || def.DesireRadius == 0) continue;
-                Stamp(i % Width, i / Width, def.Width, def.Height, def.DesireRadius, def.Desirability);
+                var (dw, dh) = Size(i);
+                Stamp(i % Width, i / Width, dw, dh, def.DesireRadius, def.Desirability);
             }
             for (int i = 0; i < n; i++) Desirability[i] = Math.Max(-100, Math.Min(100, Desirability[i]));
         }
@@ -595,10 +658,10 @@ namespace Horizonte.Simulation
             {
                 if (use > remaining) continue;
                 remaining -= use;
-                var def = DefAt(a);
+                var (cw, ch) = Size(a);
                 int ax = a % Width, ay = a / Width;
-                for (int dy = 0; dy < def.Height; dy++)
-                for (int dx = 0; dx < def.Width; dx++)
+                for (int dy = 0; dy < ch; dy++)
+                for (int dx = 0; dx < cw; dx++)
                     Coverage[Index(ax + dx, ay + dy)] |= bit;
             }
             utilitySupply[(int)s] = supply;
