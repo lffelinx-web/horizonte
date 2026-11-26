@@ -101,7 +101,7 @@ class Group:
         verts = bmesh.ops.create_cube(self.bm, size=1, matrix=mtx)["verts"]
         self._paint(verts, m)
         b = min(bevel, (x1 - x0) / 3, (y1 - y0) / 3, (z1 - z0) / 3)
-        if b > .002:
+        if b >= .015:
             edges = list({e for v in verts for e in v.link_edges})
             res = bmesh.ops.bevel(self.bm, geom=edges, offset=b, segments=1, affect="EDGES", profile=.5)
             i = self.mi(m)
@@ -154,6 +154,11 @@ class Group:
         self.bm.faces.new(vs)
         self._paint(vs, m)
 
+    def quad(self, x0, y0, x1, y1, z, m):
+        vs = [self.bm.verts.new(v) for v in ((x0, y0, z), (x1, y0, z), (x1, y1, z), (x0, y1, z))]
+        self.bm.faces.new(vs)
+        self._paint(vs, m)
+
     def finish(self, parent=None):
         me = bpy.data.meshes.new(self.name)
         self.bm.normal_update()
@@ -170,8 +175,7 @@ G = {k: Group(n) for k, n in [
     ("jardinera", "03 · Jardinera y arriates"), ("envolvente", "04 · Envolvente"),
     ("piedra", "05 · Muro de piedra"), ("cubierta", "06 · Azotea, pretiles y tinaco"),
     ("ventanas", "07 · Ventanas y persianas"), ("acceso", "08 · Acceso, puerta y marquesina"),
-    ("lamparas", "09 · Lámparas y herrajes"), ("plantas", "10 · Plantación baja"),
-    ("arboles", "11 · Árboles")]}
+    ("lamparas", "09 · Lámparas y herrajes"), ("plantas", "10 · Plantación baja")]}
 
 # ---------------------------------------------------------------- medidas generales
 X0, X1 = -3.3, 3.3          # ancho de la casa (6.6 m)
@@ -192,37 +196,29 @@ for _ in range(14):
     cx, cy = random.uniform(-4.2, 4.2), random.uniform(-4.2, 4.2)
     if X0 - .3 < cx < X1 + .3 and YF - .3 < cy < YB + .3: continue
     s = random.uniform(.4, .9)
-    t.ico((cx, cy, GR - .012), s, M["cesped2"], sub=1, jitter=.0, squash=.025)
+    t.ico((cx, cy, GR - .012), s, M["cesped2"], sub=1, jitter=.0, squash=.025, smooth=True)
 
 # adoquín perimetral 0.5 m, piezas de 0.5 x 0.25 con juntas
 b = G["banqueta"]
 b.box(-5, -5, .06, 5, 5, .1, M["junta"], bevel=0) if False else None
 def pavers(xa, ya, xb, yb, along_x):
-    L, W, gap = .5, .25, .018
+    """Franja de adoquín: una losa con las juntas dibujadas encima (pocas caras, mismo aspecto de lejos)."""
+    b.box(xa, ya, .06, xb, yb, .13, M["adoquin"], 0)
+    L, W, g, z = .5, .25, .007, .1305
     if along_x:
-        rows = int(round((yb - ya) / W))
-        for r in range(rows):
-            off = (r % 2) * L / 2
-            x = xa - off
-            while x < xb - .01:
-                p0, p1 = max(x, xa), min(x + L, xb)
-                if p1 - p0 > .05:
-                    m = M["adoquin"] if random.random() > .25 else M["adoquin2"]
-                    h = .13 + random.uniform(-.004, .004)
-                    b.box(p0 + gap / 2, ya + r * W + gap / 2, .06, p1 - gap / 2, ya + (r + 1) * W - gap / 2, h, m, .01)
-                x += L
+        for r in range(1, int(round((yb - ya) / W))):
+            b.quad(xa, ya + r * W - g, xb, ya + r * W + g, z, M["junta"])
+        for r in range(int(round((yb - ya) / W))):
+            u = xa + L - (r % 2) * L / 2
+            while u < xb - .05:
+                b.quad(u - g, ya + r * W, u + g, ya + (r + 1) * W, z, M["junta"]); u += L
     else:
-        cols = int(round((xb - xa) / W))
-        for c in range(cols):
-            off = (c % 2) * L / 2
-            y = ya - off
-            while y < yb - .01:
-                p0, p1 = max(y, ya), min(y + L, yb)
-                if p1 - p0 > .05:
-                    m = M["adoquin"] if random.random() > .25 else M["adoquin2"]
-                    h = .13 + random.uniform(-.004, .004)
-                    b.box(xa + c * W + gap / 2, p0 + gap / 2, .06, xa + (c + 1) * W - gap / 2, p1 - gap / 2, h, m, .01)
-                y += L
+        for c in range(1, int(round((xb - xa) / W))):
+            b.quad(xa + c * W - g, ya, xa + c * W + g, yb, z, M["junta"])
+        for c in range(int(round((xb - xa) / W))):
+            u = ya + L - (c % 2) * L / 2
+            while u < yb - .05:
+                b.quad(xa + c * W, u - g, xa + (c + 1) * W, u + g, z, M["junta"]); u += L
 pavers(-5, -5, 5, -4.5, True)      # frente
 pavers(-5, 4.5, 5, 5, True)        # fondo
 pavers(-5, -4.5, -4.5, 4.5, False) # izquierda
@@ -279,9 +275,9 @@ def ashlar(u0, u1, z0, z1, place):
                       random.choice(stones))
             u += w
 # cara frontal (y = YF), cara lateral derecha (x = X1) y cara hacia la puerta (x = DX1)
-ashlar(DX1, X1, FL, 2.6, lambda a, c, za, zb, p, m: s.box(a, YF - p, za, c, YF + .01, zb, m, .018))
-ashlar(YF, YR + .2, FL, 2.6, lambda a, c, za, zb, p, m: s.box(X1 - .01, a, za, X1 + p, c, zb, m, .018))
-ashlar(YF, YR, FL, 2.6, lambda a, c, za, zb, p, m: s.box(DX1 - p, a, za, DX1 + .01, c, zb, m, .018))
+ashlar(DX1, X1, FL, 2.6, lambda a, c, za, zb, p, m: s.box(a, YF - p, za, c, YF + .01, zb, m, 0))
+ashlar(YF, YR + .2, FL, 2.6, lambda a, c, za, zb, p, m: s.box(X1 - .01, a, za, X1 + p, c, zb, m, 0))
+ashlar(YF, YR, FL, 2.6, lambda a, c, za, zb, p, m: s.box(DX1 - p, a, za, DX1 + .01, c, zb, m, 0))
 
 # ---------------------------------------------------------------- azotea
 c = G["cubierta"]
@@ -336,20 +332,20 @@ def window(axis, plane, u0, u1, z0, z1, out, lit=False, mullions=1):
     # fondo: luz interior o vidrio oscuro
     B(u0 + f, u1 - f, z0 + f, z1 - f, -.01, .005, M["luz"] if lit else M["vidrio"], 0)
     # persiana horizontal
-    n = int((z1 - z0 - 2 * f) / .055)
+    n = int((z1 - z0 - 2 * f) / .09)
     for k in range(n):
-        za = z0 + f + .02 + k * .055
+        za = z0 + f + .03 + k * .09
         if lit and k > n * .55: break      # persiana a medio subir en la ventana encendida
-        B(u0 + f + .02, u1 - f - .02, za, za + .032, .006, .014, M["lama_luz"] if lit else M["lama"], 0)
+        B(u0 + f + .02, u1 - f - .02, za, za + .045, .006, .014, M["lama_luz"] if lit else M["lama"], 0)
     # vidrio reflejante en el tercio superior
     # marco perimetral y parteluz
     B(u0, u1, z1 - f, z1, -.01, .06, M["marco"])
     B(u0, u1, z0, z0 + f, -.01, .06, M["marco"])
-    B(u0, u0 + f, z0, z1, -.01, .06, M["marco"])
-    B(u1 - f, u1, z0, z1, -.01, .06, M["marco"])
+    B(u0, u0 + f, z0 + f, z1 - f, -.01, .06, M["marco"])
+    B(u1 - f, u1, z0 + f, z1 - f, -.01, .06, M["marco"])
     for i in range(1, mullions + 1):
         um = u0 + (u1 - u0) * i / (mullions + 1)
-        B(um - .025, um + .025, z0, z1, -.01, .05, M["marco"])
+        B(um - .025, um + .025, z0 + f, z1 - f, -.01, .05, M["marco"])
     # repisa de hormigón
     B(u0 - .06, u1 + .06, z0 - .06, z0, -.01, .1, M["remate"], .01)
 
@@ -450,13 +446,13 @@ p = G["plantas"]
 def shrub(x, y, z, r, mats=(M["follaje1"], M["follaje2"])):
     for k in range(random.randint(2, 4)):
         p.ico((x + random.uniform(-r, r) * .5, y + random.uniform(-r, r) * .5, z + r * .5 + random.uniform(0, r * .3)),
-              r * random.uniform(.55, .85), random.choice(mats), sub=1, jitter=.2, squash=.85)
-def fern(x, y, z, size, m=M["hoja"], n=9):
+              r * random.uniform(.55, .85), random.choice(mats), sub=1, jitter=.2, squash=.85, smooth=True)
+def fern(x, y, z, size, m=M["hoja"], n=7):
     for k in range(n):
         yaw = k / n * math.tau + random.uniform(-.25, .25)
         p.blade(Vector((x, y, z)), size * random.uniform(.75, 1.1), size * .16, yaw, random.uniform(.5, 1.0), m)
 def agave(x, y, z, size):
-    for k in range(11):
+    for k in range(8):
         yaw = k * 2.39996
         p.blade(Vector((x, y, z)), size * random.uniform(.7, 1.0), size * .22, yaw, .25 + (k % 3) * .3,
                 random.choice((M["follaje2"], M["follaje3"])), droop=.05)
@@ -465,8 +461,7 @@ def flowers(x, y, z, r, n, mats):
         ang, rr = random.uniform(0, math.tau), r * math.sqrt(random.random())
         cx, cy = x + math.cos(ang) * rr, y + math.sin(ang) * rr
         cz = z + random.uniform(.12, .32)
-        p.cyl(cx, cy, z, cz, .008, .008, M["hoja"], 4, smooth=False)
-        p.ico((cx, cy, cz), random.uniform(.035, .055), random.choice(mats), sub=1, jitter=.25)
+        p.ico((cx, cy, cz), random.uniform(.04, .06), random.choice(mats), sub=1, jitter=.25, smooth=True)
 
 # jardinera: flores rojas, naranjas y algo de follaje
 hot = (M["flor_roja"], M["flor_roja"], M["flor_naranja"], M["flor_amarilla"])
@@ -495,42 +490,6 @@ for xx in [-2.6, -1.4, -.2, 1.0, 2.0, 3.0]:
 # matas sueltas en el césped
 for (xx, yy) in [(-4.0, -3.9), (3.9, -3.95), (-4.0, 3.9), (4.0, 4.0), (-1.2, -4.05)]:
     agave(xx, yy, GR, .3)
-
-# ---------------------------------------------------------------- árboles
-tr = G["arboles"]
-def tree(x, y, h, crown, seed):
-    rnd = random.Random(seed)
-    tr.cyl(x, y, GR, h * .55, .11, .07, M["corteza"], 8)
-    # ramas principales
-    for k in range(4):
-        yaw = k * math.tau / 4 + rnd.uniform(-.4, .4)
-        L = rnd.uniform(.7, 1.0)
-        rot = Matrix.Rotation(yaw, 4, "Z") @ Matrix.Rotation(rnd.uniform(.5, .8), 4, "Y")
-        base = Vector((x, y, h * rnd.uniform(.42, .55)))
-        tip_dir = rot @ Vector((0, 0, 1))
-        cen = base + tip_dir * L / 2
-        m = Matrix.Translation(cen) @ rot
-        v = bmesh.ops.create_cone(tr.bm, cap_ends=True, segments=6, radius1=.05, radius2=.025, depth=L, matrix=m)["verts"]
-        tr._paint(v, M["corteza"], True)
-    # copa: racimos de follaje en tres tonos
-    mats = (M["follaje1"], M["follaje2"], M["follaje3"])
-    for k in range(42):
-        ang = rnd.uniform(0, math.tau)
-        rr = crown * math.sqrt(rnd.random()) * .8
-        zz = h * .6 + rnd.uniform(0, h * .34) - rr * .3
-        r = rnd.uniform(.2, .34) * crown
-        cx, cy = x + math.cos(ang) * rr, y + math.sin(ang) * rr
-        cx = max(-4.95 + r, min(4.95 - r, cx)); cy = max(-4.95 + r, min(4.95 - r, cy))
-        shade = mats[0] if zz < h * .72 or rnd.random() < .3 else rnd.choice(mats[1:])
-        tr.ico((cx, cy, zz), r * .72, shade, sub=1, jitter=.12, squash=.8, smooth=True)
-        for q in range(70):
-            d = Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, .8))).normalized() * r * rnd.uniform(.7, 1.05)
-            pc = Vector((cx, cy, zz)) + d
-            pc.x = max(-4.97, min(4.97, pc.x)); pc.y = max(-4.97, min(4.97, pc.y))
-            lm = shade if rnd.random() < .6 else rnd.choice(mats)
-            tr.leaf(pc, rnd.uniform(.13, .2), lm)
-tree(-4.0, -1.9, 4.3, 1.1, 1)
-tree(4.0, 1.4, 4.6, 1.15, 2)
 
 # ---------------------------------------------------------------- objetos y exportación
 root = bpy.data.objects.new("Vivienda 01 · Casa básica", None)
