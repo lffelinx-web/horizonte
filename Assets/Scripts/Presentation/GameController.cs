@@ -5,6 +5,8 @@ using Horizonte.Simulation;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace Horizonte.Presentation
 {
@@ -39,6 +41,7 @@ namespace Horizonte.Presentation
             Hud = gameObject.AddComponent<Hud>();
             Placement = gameObject.AddComponent<PlacementController>();
 
+            TryLook(ArgValue("-look"));
             bool demo = HasArg("-demo");
             City = HasArg("-vitrina") ? Demo.Showcase() : demo ? Demo.Build() : Load() ?? CityGenerator.Create();
             Attach(cam);
@@ -152,6 +155,32 @@ namespace Horizonte.Presentation
         }
 
         // ---------------------------------------------------------------- development helpers
+
+        /// <summary>
+        /// Review aid (command line: -look suave|viva|intensa): the same city with gentler or stronger contrast and colour,
+        /// to compare captures before a look is fixed in ProjectSetup.
+        /// </summary>
+        static void TryLook(string look)
+        {
+            if (string.IsNullOrEmpty(look)) return;
+            float contrast, saturation, sun, shade;
+            switch (look)
+            {
+                case "suave": contrast = 20; saturation = 25; sun = 1.9f; shade = 1.05f; break;
+                case "intensa": contrast = 32; saturation = 45; sun = 2.3f; shade = .86f; break;
+                default: contrast = 26; saturation = 35; sun = 2.1f; shade = .93f; break;
+            }
+            var volume = FindAnyObjectByType<Volume>();
+            if (volume != null && volume.sharedProfile.TryGet(out ColorAdjustments colour))
+            {
+                colour.contrast.Override(contrast);
+                colour.saturation.Override(saturation);
+            }
+            if (RenderSettings.sun != null) RenderSettings.sun.intensity = sun;
+            RenderSettings.ambientSkyColor = new Color(.56f, .64f, .80f) * shade;
+            RenderSettings.ambientEquatorColor = new Color(.5f, .53f, .5f) * shade;
+            RenderSettings.ambientGroundColor = new Color(.31f, .29f, .25f) * shade;
+        }
 
         static bool HasArg(string name) => Array.IndexOf(Environment.GetCommandLineArgs(), name) >= 0;
 

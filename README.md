@@ -32,12 +32,39 @@ Una casilla mide **10 × 10 m**. Cada edificio del juego tiene un nombre de arch
 
 Si el modelo trae otro tamaño, cambia su ancho y fondo en `Catalog.cs` para que coincidan. Para tener variantes, añade una letra al final, por ejemplo `casa_basica_b.fbx`; el juego elige una al azar.
 
-Reglas para exportar:
+### Guía de modelado
 
-- 1 unidad de Blender = 1 metro, con el modelo a tamaño real y su terreno dentro de la planta (una casa de 10 × 10 m, un hospital de 40 × 36 m en 4 × 4 casillas).
-- El origen del objeto va en el **centro de la planta, a nivel del suelo**.
-- La fachada principal mira hacia **−Y en Blender**, como en los modelos actuales. El juego gira el edificio para que mire a la calle.
-- Los materiales son colores lisos (sin texturas). El vidrio y el metal se reconocen por el nombre del material (vidrio, cristal, aluminio, herrajes, acero…).
+**Tamaño.** El terreno ocupa casillas completas y nada se sale de él (ni aleros ni árboles); deja 0.3 m libres por lado para el edificio.
+
+| Casillas | Forma | Terreno | Vértices como máximo |
+| --- | --- | --- | --- |
+| 1 | 1 × 1 | 10 × 10 m | 15 000 |
+| 2 | 2 × 1 o 1 × 2 | 20 × 10 m o 10 × 20 m | 25 000 |
+| 4 | 2 × 2 | 20 × 20 m | 40 000 |
+| 6–9 | 3 × 2 o 3 × 3 | 30 × 20 m o 30 × 30 m | 60 000–90 000 |
+
+La fachada principal es el lado del ancho (eje X de Blender). Los edificios rectangulares se acuestan solos para dar a calles que van de norte a sur.
+
+**En Blender.**
+
+- 1 unidad = 1 metro, escala 1, con escala y rotación aplicadas (Ctrl+A → All Transforms).
+- El origen va en el **centro del terreno, a nivel del suelo**.
+- La fachada principal mira hacia **−Y** (lo que se ve en la vista Frontal, tecla 1 del teclado numérico).
+- Base del terreno de 0.15 m de alto como máximo, sin pedestales.
+- Unos 3 m por piso en vivienda (planta baja de 3.2 m).
+
+**Color, para que la ciudad se vea viva.**
+
+- El juego convierte cada material en un color liso: de las texturas solo queda su tono promedio y el relieve se pierde. Usa colores claros y definidos.
+- La pared principal clara (material con *estuco*, *aplanado*, *pintura*, *muro* o *pared* en el nombre) se repinta en el juego con un color por edificio en viviendas y comercios: terracota, mostaza, azul, menta, rosa o durazno. Modélala en un tono claro y neutro (marfil o blanco).
+- Los acentos conservan su color: madera, cantera, ladrillo, herrería, terracota. Úsalos para que cada edificio tenga carácter.
+- Vidrio oscuro y azulado; el juego lo oscurece si viene claro. Nómbralo *vidrio*, *cristal* o *ventana*.
+- Metal con *metal*, *aluminio*, *acero*, *herraje* o *latón* en el nombre.
+- Las lámparas e interiores encendidos se nombran *lámpara*, *luz* o *iluminado*, y brillan con luz propia.
+- El pasto del lote (*césped* o *pasto*) toma el verde del mapa para que el terreno no se note.
+- Evita que todo sea del mismo tono: variedad de colores entre azotea, muros, acentos y jardín.
+
+**Peso.** Las rejas, los arbustos y las barandas con mucho detalle son lo que más pesa: mejor rejas planas y árboles sencillos.
 
 **Horizonte > Preparar edificios** (que también corre antes de cada compilación) une cada modelo en una sola pieza con una paleta de colores compartida, genera versiones simplificadas para la distancia y guarda el resultado en `Assets/Resources/Buildings`. La consola muestra las medidas de cada edificio.
 

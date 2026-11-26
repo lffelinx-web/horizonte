@@ -21,6 +21,19 @@ namespace Horizonte.EditorTools
         const string PalettePath = GeneratedFolder + "/Paleta.png";
         const string GlossPath = GeneratedFolder + "/Paleta_brillo.png";
         const string GlowPath = GeneratedFolder + "/Paleta_luz.png";
+        /// <summary>Materials with the facades repainted, loaded by the game to give each house and shop its colour.</summary>
+        const string FacadeFolder = "Assets/Resources/Fachadas";
+
+        /// <summary>Facade colours (sRGB): terracotta, mustard, blue, mint, Mexican pink and peach.</summary>
+        static readonly (string name, Color colour)[] FacadeColours =
+        {
+            ("terracota", new Color(.82f, .47f, .34f)),
+            ("mostaza", new Color(.92f, .74f, .36f)),
+            ("azul", new Color(.47f, .64f, .82f)),
+            ("menta", new Color(.56f, .79f, .67f)),
+            ("rosa", new Color(.89f, .53f, .62f)),
+            ("durazno", new Color(.95f, .72f, .56f)),
+        };
         const string MaterialPath = GeneratedFolder + "/Edificios.mat";
         const int PaletteSize = 32;
 
@@ -36,9 +49,11 @@ namespace Horizonte.EditorTools
             public byte Metallic, Smoothness;
             /// <summary>Lamps and lit interiors give off their own light.</summary>
             public bool Glows;
+            /// <summary>Main wall, repainted per building with one of the facade colours.</summary>
+            public bool Facade;
 
-            public bool Equals(Swatch o) => Color.r == o.Color.r && Color.g == o.Color.g && Color.b == o.Color.b && Metallic == o.Metallic && Smoothness == o.Smoothness && Glows == o.Glows;
-            public override int GetHashCode() => (Color.r << 24) ^ (Color.g << 16) ^ (Color.b << 8) ^ (Metallic << 4) ^ Smoothness ^ (Glows ? 1 << 30 : 0);
+            public bool Equals(Swatch o) => Color.r == o.Color.r && Color.g == o.Color.g && Color.b == o.Color.b && Metallic == o.Metallic && Smoothness == o.Smoothness && Glows == o.Glows && Facade == o.Facade;
+            public override int GetHashCode() => (Color.r << 24) ^ (Color.g << 16) ^ (Color.b << 8) ^ (Metallic << 4) ^ Smoothness ^ (Glows ? 1 << 30 : 0) ^ (Facade ? 1 << 29 : 0);
         }
 
         [MenuItem("Horizonte/Preparar edificios")]
@@ -187,8 +202,10 @@ namespace Horizonte.EditorTools
             bool foliage = lawn || n.Contains("follaje") || n.Contains("hoja");
             if (glass)
             {
-                metallic = .1f;
-                smoothness = .78f;
+                // Deep blue-grey panes: they contrast with the walls instead of mirroring the pale sky.
+                srgb = Color.Lerp(srgb, GlassColour, .8f);
+                metallic = .05f;
+                smoothness = .82f;
             }
             else if (metal)
             {
@@ -200,37 +217,30 @@ namespace Horizonte.EditorTools
                 smoothness = .08f;
             }
             if (lawn) srgb = LawnColour;
-            else if (!glass && !metal && !foliage) srgb = Brighten(srgb, n);
             return new Swatch
             {
                 Color = srgb,
                 Metallic = (byte)Mathf.RoundToInt(metallic * 255),
                 Smoothness = (byte)Mathf.RoundToInt(smoothness * 255),
                 Glows = !glass && IsLight(m, n),
+                Facade = !glass && !metal && !foliage && IsFacade(srgb, n),
             };
         }
 
         /// <summary>Lawns in the models match the grass of the map, so a lot blends into the ground around it.</summary>
         static readonly Color LawnColour = new Color(.525f, .678f, .361f);
 
-        /// <summary>Flat roofs, white or light grey like most in Mexico; they are what the camera sees most.</summary>
-        static readonly Color RoofColour = new Color(.86f, .85f, .81f);
+        static readonly Color GlassColour = new Color(.12f, .19f, .27f);
 
         /// <summary>
-        /// The game has no relief maps nor the studio light of the renders, so walls read darker than they were drawn.
-        /// Light colours (stucco, concrete, stone) are lifted; dark ones chosen on purpose (wood, asphalt) stay.
+        /// The main wall of a building: pale plaster or paint. Each house and shop gets its own colour for it in the game,
+        /// so a street is not a row of identical white boxes. Accents (terracotta, wood, stone) keep theirs.
         /// </summary>
-        static Color Brighten(Color c, string name)
+        static bool IsFacade(Color c, string name)
         {
-            if (name.Contains("impermeab") || name.Contains("azotea") || name.Contains("techo") || name.Contains("cubierta") || name.Contains("losa"))
-                return Color.Lerp(c, RoofColour, .65f);
-            Color.RGBToHSV(c, out float h, out float s, out float v);
-            if (v < .3f) return c;
-            float lift = Mathf.InverseLerp(.3f, .45f, v);
-            v = Mathf.Min(.95f, v * (1 + .2f * lift));
-            var result = Color.HSVToRGB(h, s, v);
-            result.a = 1;
-            return result;
+            bool wall = name.Contains("estuco") || name.Contains("aplanado") || name.Contains("fachada") || name.Contains("pintura") || name.Contains("muro") || name.Contains("pared");
+            Color.RGBToHSV(c, out _, out float s, out float v);
+            return wall && v > .55f && s < .3f;
         }
 
         /// <summary>Lamps and lit windows: an emissive material in the FBX, or one named like a light.</summary>
@@ -277,6 +287,20 @@ namespace Horizonte.EditorTools
                 glow[i] = s.Glows ? new Color32(s.Color.r, s.Color.g, s.Color.b, 255) : new Color32(0, 0, 0, 255);
             }
             SavePng(PalettePath, colors, true);
+            for (int k = 0; k < FacadeColours.Length; k++)
+            {
+                var painted = (Color32[])colors.Clone();
+                for (int i = 0; i < palette.Count; i++)
+                {
+                    if (!palette[i].Facade) continue;
+                    // Keep how light or shaded the wall was drawn.
+                    Color original = palette[i].Color;
+                    float shade = Mathf.Clamp(original.grayscale / .72f, .8f, 1.15f);
+                    var c = FacadeColours[k].colour * shade;
+                    painted[i] = new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1);
+                }
+                SavePng(FacadePalettePath(k), painted, true);
+            }
             SavePng(GlossPath, gloss, false);
             SavePng(GlowPath, glow, true);
         }
@@ -298,16 +322,28 @@ namespace Horizonte.EditorTools
             importer.SaveAndReimport();
         }
 
+        static string FacadePalettePath(int k) => $"{GeneratedFolder}/Paleta_{FacadeColours[k].name}.png";
+
+        /// <summary>The shared building material, plus one per facade colour that only swaps the palette.</summary>
         static Material Material()
         {
-            var m = AssetDatabase.LoadAssetAtPath<Material>(MaterialPath);
+            Directory.CreateDirectory(FacadeFolder);
+            AssetDatabase.Refresh();
+            for (int k = 0; k < FacadeColours.Length; k++)
+                Material($"{FacadeFolder}/Edificios_{k}_{FacadeColours[k].name}.mat", FacadePalettePath(k));
+            return Material(MaterialPath, PalettePath);
+        }
+
+        static Material Material(string path, string palettePath)
+        {
+            var m = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (m == null)
             {
-                m = new Material(Shader.Find("Universal Render Pipeline/Lit")) { name = "Edificios" };
-                AssetDatabase.CreateAsset(m, MaterialPath);
+                m = new Material(Shader.Find("Universal Render Pipeline/Lit")) { name = Path.GetFileNameWithoutExtension(path) };
+                AssetDatabase.CreateAsset(m, path);
             }
             m.shader = Shader.Find("Universal Render Pipeline/Lit");
-            m.SetTexture("_BaseMap", AssetDatabase.LoadAssetAtPath<Texture2D>(PalettePath));
+            m.SetTexture("_BaseMap", AssetDatabase.LoadAssetAtPath<Texture2D>(palettePath));
             m.SetColor("_BaseColor", Color.white);
             m.SetTexture("_MetallicGlossMap", AssetDatabase.LoadAssetAtPath<Texture2D>(GlossPath));
             m.EnableKeyword("_METALLICSPECGLOSSMAP");

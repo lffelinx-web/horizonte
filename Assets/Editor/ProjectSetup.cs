@@ -189,8 +189,8 @@ namespace Horizonte.EditorTools
             bloom.scatter.Override(.6f);
             var color = profile.Add<ColorAdjustments>(true);
             color.postExposure.Override(.45f);
-            color.contrast.Override(18);
-            color.saturation.Override(20);
+            color.contrast.Override(26);
+            color.saturation.Override(35);
             var split = profile.Add<SplitToning>(true);
             split.shadows.Override(new Color(.42f, .5f, .62f));
             split.highlights.Override(new Color(.62f, .55f, .44f));
@@ -223,7 +223,7 @@ namespace Horizonte.EditorTools
             var sun = sunGo.GetComponent<Light>();
             sun.type = LightType.Directional;
             sun.color = new Color(1, .93f, .8f);
-            sun.intensity = 1.75f;
+            sun.intensity = 2.1f;
             sun.shadows = LightShadows.Soft;
             sun.shadowStrength = .9f;
             sunGo.transform.rotation = Quaternion.Euler(47, -38, 0);
@@ -239,9 +239,9 @@ namespace Horizonte.EditorTools
 
             RenderSettings.skybox = null;
             RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(.66f, .72f, .82f);
-            RenderSettings.ambientEquatorColor = new Color(.63f, .62f, .57f);
-            RenderSettings.ambientGroundColor = new Color(.42f, .39f, .33f);
+            RenderSettings.ambientSkyColor = new Color(.52f, .6f, .74f);
+            RenderSettings.ambientEquatorColor = new Color(.47f, .49f, .47f);
+            RenderSettings.ambientGroundColor = new Color(.29f, .27f, .23f);
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
             RenderSettings.fogDensity = .0013f;

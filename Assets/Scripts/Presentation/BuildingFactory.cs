@@ -17,6 +17,8 @@ namespace Horizonte.Presentation
 
         readonly Dictionary<string, List<GameObject>> models = new Dictionary<string, List<GameObject>>();
         readonly Dictionary<ushort, Mesh> meshes = new Dictionary<ushort, Mesh>();
+        // The building material with the main walls repainted: terracotta, mustard, blue, mint, pink, peach.
+        readonly Material[] facades;
         static readonly Regex Variant = new Regex("_[a-z]$");
 
         public BuildingFactory()
@@ -27,6 +29,8 @@ namespace Horizonte.Presentation
                 if (!models.TryGetValue(key, out var list)) models[key] = list = new List<GameObject>();
                 list.Add(model);
             }
+            facades = Resources.LoadAll<Material>("Fachadas");
+            System.Array.Sort(facades, (a, b) => string.CompareOrdinal(a.name, b.name));
         }
 
         public bool HasModel(BuildingDef def) => models.ContainsKey(def.Model);
@@ -37,6 +41,7 @@ namespace Horizonte.Presentation
             if (models.TryGetValue(def.Model, out var list))
             {
                 go = Object.Instantiate(list[(int)(seed % (uint)list.Count)]);
+                Paint(go, def, seed);
             }
             else
             {
@@ -48,6 +53,19 @@ namespace Horizonte.Presentation
             go.name = def.Model;
             go.transform.localRotation = Quaternion.Euler(0, rotation * 90, 0);
             return go;
+        }
+
+        /// <summary>
+        /// Houses and shops get a wall colour of their own, picked from the lot so it stays the same between visits.
+        /// About one in four keeps the colour it was modelled with.
+        /// </summary>
+        void Paint(GameObject go, BuildingDef def, uint seed)
+        {
+            if (facades.Length == 0 || (def.Category != Category.Housing && def.Category != Category.Commerce)) return;
+            int pick = (int)((seed / 7) % (uint)(facades.Length + 2));
+            if (pick >= facades.Length) return;
+            var renderer = go.GetComponent<MeshRenderer>();
+            if (renderer != null) renderer.sharedMaterial = facades[pick];
         }
 
         static Material[] Materials(BuildingDef def)
