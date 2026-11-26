@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -109,8 +110,22 @@ namespace Horizonte.EditorTools
                 var b = mesh.bounds;
                 Debug.Log($"Horizonte: edificio {name}: {mesh.vertexCount} vértices, {b.size.x:0.0} x {b.size.z:0.0} m, {b.size.y:0.0} m de alto, {mesh.lodCount} niveles de detalle.");
             }
+            RemoveStale(baked.Select(b => b.name).ToHashSet());
             AssetDatabase.SaveAssets();
             Debug.Log($"Horizonte: {baked.Count} edificios preparados, {palette.Count} colores en la paleta.");
+        }
+
+        /// <summary>Deletes prepared buildings whose model left Assets/Modelos, so they fall back to the placeholder.</summary>
+        static void RemoveStale(HashSet<string> names)
+        {
+            foreach (var (folder, filter) in new[] { (PrefabFolder, "t:Prefab"), (GeneratedFolder, "t:Mesh") })
+                foreach (var guid in AssetDatabase.FindAssets(filter, new[] { folder }))
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guid);
+                    if (names.Contains(Path.GetFileNameWithoutExtension(path).ToLowerInvariant())) continue;
+                    AssetDatabase.DeleteAsset(path);
+                    Debug.Log($"Horizonte: {path} ya no tiene modelo y se quitó.");
+                }
         }
 
         /// <summary>Merges every mesh of a model into one, in the model's space turned to face -Z. UV.x temporarily holds the palette index.</summary>

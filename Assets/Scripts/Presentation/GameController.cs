@@ -15,12 +15,15 @@ namespace Horizonte.Presentation
     {
         /// <summary>Game days per real second at each speed: paused, normal, fast.</summary>
         static readonly float[] DaysPerSecond = { 0, 1.5f, 6 };
+        /// <summary>How fast street life moves at each speed.</summary>
+        static readonly float[] StreetSpeed = { 0, 1, 3 };
 
         public City City { get; private set; }
         public CityView View { get; private set; }
         public CameraRig Rig { get; private set; }
         public Hud Hud { get; private set; }
         public PlacementController Placement { get; private set; }
+        public Traffic Traffic { get; private set; }
 
         int speed = 1;
         float clock;
@@ -38,6 +41,7 @@ namespace Horizonte.Presentation
             if (cam == null) cam = new GameObject("Main Camera", typeof(Camera)) { tag = "MainCamera" }.GetComponent<Camera>();
             Rig = gameObject.AddComponent<CameraRig>();
             View = new GameObject("Ciudad").AddComponent<CityView>();
+            Traffic = new GameObject("Gente").AddComponent<Traffic>();
             Hud = gameObject.AddComponent<Hud>();
             Placement = gameObject.AddComponent<PlacementController>();
 
@@ -56,6 +60,7 @@ namespace Horizonte.Presentation
         {
             City.MonthPassed += Save;
             View.Init(City);
+            Traffic.Init(City, Rig);
             Rig.Init(cam, new Vector2(City.Width, City.Height) * CityView.TileSize);
             Rig.Focus = CityView.TileCentre(City.Width / 2 - 6, City.Height / 2);
             Rig.Distance = 190;
@@ -72,6 +77,7 @@ namespace Horizonte.Presentation
                 City.Step();
             }
             View.Sync(clock);
+            Traffic.Tick(StreetSpeed[speed]);
         }
 
         public void SelectTool(Tool t)
@@ -208,6 +214,31 @@ namespace Horizonte.Presentation
             }
         }
 
+        /// <summary>People and the car of a house with a garage, in the morning and in the afternoon.</summary>
+        IEnumerator StreetLife(string folder)
+        {
+            int house = -1;
+            for (int i = 0; i < City.Building.Length && house < 0; i++)
+                if (City.Anchor[i] == i && City.DefAt(i)?.Model == "casa_ampliada" && City.Working(i) && City.Occupants[i] > 0) house = i;
+            if (house < 0) yield break;
+            var (w, h) = City.Size(house);
+            Rig.Focus = new Vector3((house % City.Width + w * .5f) * CityView.TileSize, 0, (house / City.Width + h * .5f) * CityView.TileSize);
+            Rig.Yaw = 20 + City.Rotation[house] * 90;
+            Rig.Distance = 75;
+            SetSpeed(1);
+            var shots = new[] { (2f, .2f), (8f, .25f), (3f, -1f), (10f, .69f), (12f, -1f), (6f, -1f) };
+            for (int k = 0; k < shots.Length; k++)
+            {
+                if (shots[k].Item2 >= 0) Traffic.TimeOfDay = shots[k].Item2;
+                yield return new WaitForSecondsRealtime(shots[k].Item1);
+                ScreenCapture.CaptureScreenshot(Path.Combine(folder, $"captura_gente_{k + 1}.png"));
+                Debug.Log($"Horizonte: captura de gente {k + 1} a la hora {Traffic.TimeOfDay * 24:0.0}");
+                yield return null;
+                yield return null;
+            }
+            SetSpeed(0);
+        }
+
         /// <summary>Saves screenshots from a few angles and quits. Used to check the look without a device.</summary>
         IEnumerator Capture(string folder)
         {
@@ -280,6 +311,7 @@ namespace Horizonte.Presentation
                 // Close-ups to check that models face the street (rotation 0 faces south, toward a camera at yaw 0).
                 Hud.HideInfo();
                 yield return CloseUp(folder, "captura_casa.png", i => City.DefAt(i)?.Model == "casa_ampliada" && City.Rotation[i] == 0, 45);
+                yield return StreetLife(folder);
                 yield return CloseUp(folder, "captura_edificios.png", i => City.DefAt(i)?.Model == "apartamentos", 110);
                 yield return CloseUp(folder, "captura_servicio.png", i => City.DefAt(i)?.Model == "escuela_primaria", 90);
 

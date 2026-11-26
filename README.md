@@ -66,6 +66,10 @@ La fachada principal es el lado del ancho (eje X de Blender). Los edificios rect
 
 **Peso.** Las rejas, los arbustos y las barandas con mucho detalle son lo que más pesa: mejor rejas planas y árboles sencillos.
 
+**Personas y coches.** En la calle hay personas que salen de los edificios y un coche por cada casa con cochera, con figuras provisionales. Para usar los tuyos, pon en `Assets/Modelos` archivos que empiecen con `persona` (por ejemplo `persona_a.fbx`, `persona_b.fbx`) o con `coche`. Las personas miden unos 1.7 m y tienen de 300 a 800 vértices; los coches, unos 4.2 m de largo y unos 1 500 vértices. En ambos, el origen va en el suelo, al centro, y el frente mira hacia −Y. Dónde se estaciona el coche de cada casa está en `Garages`, en `Assets/Scripts/Presentation/Traffic.cs`; hoy solo la casa ampliada tiene cochera.
+
+**Modelos pendientes.** Los modelos que pasan del límite de vértices esperan en la carpeta `Modelos pendientes`, fuera del juego. Mientras tanto, esos edificios usan su forma provisional.
+
 **Horizonte > Preparar edificios** (que también corre antes de cada compilación) une cada modelo en una sola pieza con una paleta de colores compartida, genera versiones simplificadas para la distancia y guarda el resultado en `Assets/Resources/Buildings`. La consola muestra las medidas de cada edificio.
 
 ## Controles
