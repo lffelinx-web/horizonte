@@ -404,6 +404,20 @@ namespace Horizonte.Presentation
                 Hud.HideInfo();
                 yield return CloseUp(folder, "captura_casa.png", i => City.DefAt(i)?.Model == "casa_ampliada" && City.Rotation[i] == 0, 45);
                 yield return StreetLife(folder);
+                // A junction up close: rounded corners, zebra crossings, people crossing on them, cables to the houses.
+                SetHour(8);
+                Rig.Focus = CityView.TileCentre(City.Width / 2 - 6, City.Height / 2);
+                Rig.Yaw = 35;
+                Rig.Distance = 55;
+                SetSpeed(2);
+                yield return new WaitForSecondsRealtime(8);
+                ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_cruce.png"));
+                yield return null;
+                Rig.Distance = 110;
+                yield return new WaitForSecondsRealtime(3);
+                ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_cruce_2.png"));
+                yield return null;
+                SetSpeed(0);
                 yield return CloseUp(folder, "captura_edificios.png", i => City.DefAt(i)?.Model == "apartamentos", 110);
                 yield return CloseUp(folder, "captura_servicio.png", i => City.DefAt(i)?.Model == "escuela_primaria", 90);
 

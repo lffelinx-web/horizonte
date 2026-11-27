@@ -194,6 +194,7 @@ namespace Horizonte.Presentation
             felling.Clear();
             warnings.Clear();
             layerFilter = null;
+            dropsFilter = null;
             var mats = Palette.Get(GroundMaterials);
             for (int i = 0; i < chunkFilters.Length; i++)
             {
@@ -405,17 +406,18 @@ namespace Horizonte.Presentation
             if (w) builder.Flat(SAsphalt, x0, z0 + curb, x0 + curb, z1 - curb, .02f);
             if (e) builder.Flat(SAsphalt, x1 - curb, z0 + curb, x1, z1 - curb, .02f);
 
-            // Raised sidewalks in the corners, and along every side without a link.
-            Sidewalk(x0, z0, x0 + curb, z0 + curb, sidewalkHeight);
-            Sidewalk(x1 - curb, z0, x1, z0 + curb, sidewalkHeight);
-            Sidewalk(x0, z1 - curb, x0 + curb, z1, sidewalkHeight);
-            Sidewalk(x1 - curb, z1 - curb, x1, z1, sidewalkHeight);
+            // Raised sidewalks in the corners, rounded where two streets meet, and along every side without a link.
+            Corner(x0, z0, curb, sidewalkHeight, 0, s && w);
+            Corner(x1, z0, curb, sidewalkHeight, 1, s && e);
+            Corner(x1, z1, curb, sidewalkHeight, 2, n && e);
+            Corner(x0, z1, curb, sidewalkHeight, 3, n && w);
             if (!s) Sidewalk(x0 + curb, z0, x1 - curb, z0 + curb, sidewalkHeight);
             if (!n) Sidewalk(x0 + curb, z1 - curb, x1 - curb, z1, sidewalkHeight);
             if (!w) Sidewalk(x0, z0 + curb, x0 + curb, z1 - curb, sidewalkHeight);
             if (!e) Sidewalk(x1 - curb, z0 + curb, x1, z1 - curb, sidewalkHeight);
 
             StreetFurniture(x, y, x0, z0, s, w, n, e, curb, sidewalkHeight);
+            if (links >= 3) Crossings(mx, mz, s, w, n, e);
 
             // Dashed centre lines; none inside junctions. Avenues get a planted median instead.
             if (links > 2) return;
@@ -491,6 +493,59 @@ namespace Horizonte.Presentation
             builder.Box(SLamp, arm, new Vector3(towardRoad.x != 0 ? reach : .12f, .12f, towardRoad.z != 0 ? reach : .12f));
             var head = at + towardRoad * reach + Vector3.up * (height - .3f);
             builder.Box(SGlow, head, new Vector3(towardRoad.x != 0 ? .7f : .34f, .2f, towardRoad.z != 0 ? .7f : .34f));
+        }
+
+        /// <summary>
+        /// Distance from the middle of a junction to the middle of its crossings: the same line people walk along the
+        /// sidewalks (Traffic.Kerb), so they cross on the stripes.
+        /// </summary>
+        public const float CrossingLine = 4.35f;
+
+        /// <summary>Zebra crossings over every street that leaves a junction, at the edge of the junction.</summary>
+        void Crossings(float mx, float mz, bool s, bool w, bool n, bool e)
+        {
+            const float half = 3.7f - .45f, stripe = .5f, step = 1f, inner = CrossingLine - 1.4f, outer = CrossingLine + .35f, y = .045f;
+            for (float a = -half; a + stripe <= half + .01f; a += step)
+            {
+                if (s) builder.Flat(SLine, mx + a, mz - outer, mx + a + stripe, mz - inner, y);
+                if (n) builder.Flat(SLine, mx + a, mz + inner, mx + a + stripe, mz + outer, y);
+                if (w) builder.Flat(SLine, mx - outer, mz + a, mx - inner, mz + a + stripe, y);
+                if (e) builder.Flat(SLine, mx + inner, mz + a, mx + outer, mz + a + stripe, y);
+            }
+        }
+
+        /// <summary>
+        /// A corner of sidewalk. Where the streets on both sides of the corner continue, the kerb is rounded (a quarter
+        /// circle) with asphalt filling what the curve leaves.
+        /// </summary>
+        void Corner(float cx, float cz, float curb, float h, int quadrant, bool rounded)
+        {
+            // Quadrant: 0 south-west corner of the tile, 1 south-east, 2 north-east, 3 north-west.
+            float sx = quadrant == 0 || quadrant == 3 ? 1 : -1, sz = quadrant <= 1 ? 1 : -1;
+            float x0 = Mathf.Min(cx, cx + sx * curb), x1 = Mathf.Max(cx, cx + sx * curb);
+            float z0 = Mathf.Min(cz, cz + sz * curb), z1 = Mathf.Max(cz, cz + sz * curb);
+            if (!rounded)
+            {
+                Sidewalk(x0, z0, x1, z1, h);
+                return;
+            }
+            builder.Flat(SAsphalt, x0, z0, x1, z1, .02f);
+            const int steps = 6;
+            var centre = new Vector3(cx, h, cz);
+            for (int k = 0; k < steps; k++)
+            {
+                float a0 = k * Mathf.PI * .5f / steps, a1 = (k + 1) * Mathf.PI * .5f / steps;
+                var p0 = centre + new Vector3(sx * Mathf.Cos(a0), 0, sz * Mathf.Sin(a0)) * curb;
+                var p1 = centre + new Vector3(sx * Mathf.Cos(a1), 0, sz * Mathf.Sin(a1)) * curb;
+                // Top, wound to face up whichever way the quadrant turns.
+                if (sx * sz > 0) builder.Triangle(SSidewalk, centre, p0, p1);
+                else builder.Triangle(SSidewalk, centre, p1, p0);
+                // The kerb face.
+                var d0 = p0 - Vector3.up * h;
+                var d1 = p1 - Vector3.up * h;
+                if (sx * sz > 0) builder.Quad(SSidewalk, d0, d1, p1, p0);
+                else builder.Quad(SSidewalk, d1, d0, p0, p1);
+            }
         }
 
         void Sidewalk(float x0, float z0, float x1, float z1, float h)
@@ -742,6 +797,79 @@ namespace Horizonte.Presentation
         {
             if (layer != Layer.None && Time.unscaledTime >= layerRefreshAt) RefreshLayer();
             if (Time.unscaledTime >= warningsAt) RefreshWarnings();
+            if (Time.unscaledTime >= dropsAt) BuildDrops();
+        }
+
+        // ---------------------------------------------------------------- service drops
+
+        MeshFilter dropsFilter;
+        readonly MeshBuilder dropsMesh = new MeshBuilder(1);
+        float dropsAt;
+
+        /// <summary>
+        /// A cable from the nearest street pole to every building that has power, so it shows at a glance which are
+        /// connected; buildings without power have none.
+        /// </summary>
+        void BuildDrops()
+        {
+            dropsAt = Time.unscaledTime + 1.5f;
+            if (dropsFilter == null)
+            {
+                var go = new GameObject("Acometidas", typeof(MeshFilter), typeof(MeshRenderer));
+                go.transform.SetParent(transform, false);
+                var mr = go.GetComponent<MeshRenderer>();
+                mr.sharedMaterial = Palette.Get("StreetLamp");
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                dropsFilter = go.GetComponent<MeshFilter>();
+                dropsFilter.sharedMesh = new Mesh();
+            }
+            dropsMesh.Clear();
+            foreach (var kv in buildings)
+            {
+                int a = kv.Key;
+                var def = city.DefAt(a);
+                var go = kv.Value;
+                if (def == null || go == null || !go.activeInHierarchy || def.PowerUse <= 0 || def.PowerSupply > 0 || !city.Powered[a]) continue;
+                if (!PoleFor(a, out var pole)) continue;
+                var bounds = new Bounds(go.transform.position, Vector3.zero);
+                foreach (var r in go.GetComponentsInChildren<Renderer>()) bounds.Encapsulate(r.bounds);
+                int rot = city.Rotation[a] & 3;
+                var front = new Vector3(City.DX[rot], 0, City.DY[rot]);
+                float reach = Mathf.Abs(Vector3.Dot(bounds.extents, front)) * .45f;
+                var attach = bounds.center + front * reach;
+                attach.y = Mathf.Clamp(bounds.max.y - .6f, 2.6f, 6.6f);
+                // A slight sag in the middle.
+                var mid = (pole + attach) * .5f + Vector3.down * .45f;
+                dropsMesh.Segment(0, pole, mid, .05f);
+                dropsMesh.Segment(0, mid, attach, .05f);
+            }
+            dropsFilter.sharedMesh = dropsMesh.ToMesh(dropsFilter.sharedMesh);
+        }
+
+        /// <summary>Top of the pole on the street in front of a building (or any straight street beside it).</summary>
+        bool PoleFor(int anchor, out Vector3 top)
+        {
+            top = default;
+            var (w, h) = city.Size(anchor);
+            int ax = anchor % city.Width, ay = anchor / city.Width, facing = city.Rotation[anchor] & 3;
+            for (int k = 0; k < 4; k++)
+            {
+                int d = (facing + k) & 3;
+                int count = d == 0 || d == 2 ? w : h;
+                for (int j = 0; j < count; j++)
+                {
+                    int x = d == 0 || d == 2 ? ax + j : d == 1 ? ax - 1 : ax + w;
+                    int y = d == 1 || d == 3 ? ay + j : d == 0 ? ay - 1 : ay + h;
+                    if (!city.IsRoad(x, y)) continue;
+                    bool s = RoadLinks(x, y, 0), wl = RoadLinks(x, y, 1), n = RoadLinks(x, y, 2), e = RoadLinks(x, y, 3);
+                    bool northSouth = (s || n) && !wl && !e, eastWest = (wl || e) && !s && !n;
+                    if (!northSouth && !eastWest) continue;
+                    const float side = .65f - .35f;
+                    top = new Vector3(x * TileSize, .12f + 7.05f, y * TileSize) + (northSouth ? new Vector3(side, 0, 1.2f) : new Vector3(1.2f, 0, side));
+                    return true;
+                }
+            }
+            return false;
         }
 
         // ---------------------------------------------------------------- warning icons

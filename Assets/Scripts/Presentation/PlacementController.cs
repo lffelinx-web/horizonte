@@ -246,7 +246,13 @@ namespace Horizonte.Presentation
                 {
                     int f = city.Index(x, y);
                     if (city.Terrain[f] != Simulation.Terrain.Forest || city.Marked.Contains(f)) continue;
-                    preview.Flat(2, x0, z0, x0 + CityView.TileSize - 2 * inset, z0 + CityView.TileSize - 2 * inset, 7.5f);
+                    // On the ground among the trunks: a thick frame and a soft fill.
+                    float s = CityView.TileSize - 2 * inset, edge = .7f;
+                    preview.Flat(2, x0 + edge, z0 + edge, x0 + s - edge, z0 + s - edge, .18f);
+                    preview.Flat(2, x0, z0, x0 + s, z0 + edge, .22f);
+                    preview.Flat(2, x0, z0 + s - edge, x0 + s, z0 + s, .22f);
+                    preview.Flat(2, x0, z0 + edge, x0 + edge, z0 + s - edge, .22f);
+                    preview.Flat(2, x0 + s - edge, z0 + edge, x0 + s, z0 + s - edge, .22f);
                     count++;
                     continue;
                 }
@@ -337,6 +343,9 @@ namespace Horizonte.Presentation
                 case PlaceResult.NeedsForest: return "Debe quedar junto a la reserva forestal";
                 case PlaceResult.Trees: return "Primero tala los árboles: usa Talar con un puesto de tala cerca";
                 case PlaceResult.NoFront: return "Debe quedar de frente a la calle";
+                case PlaceResult.CampLimit:
+                    var c = game.City;
+                    return c.NextLumberjackAt > 0 ? $"Un puesto por leñador: con {Hud.N(c.NextLumberjackAt)} habitantes podrás poner otro" : "Ya tienes un puesto por cada leñador";
                 case PlaceResult.NoWood: return $"Faltan {Tool.Def.Wood - game.City.Wood} de madera: tala árboles o espera a tu leñador";
                 default: return "Ese lugar ya está ocupado";
             }

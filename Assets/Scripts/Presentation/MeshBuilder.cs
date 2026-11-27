@@ -117,6 +117,21 @@ namespace Horizonte.Presentation
             }
         }
 
+        /// <summary>A thin bar between two points (a cable): two crossed strips, seen from both sides.</summary>
+        public void Segment(int slot, Vector3 a, Vector3 b, float thickness)
+        {
+            var along = (b - a).normalized;
+            var side = Vector3.Cross(along, Vector3.up);
+            if (side.sqrMagnitude < 1e-4f) side = Vector3.right;
+            side = side.normalized * thickness * .5f;
+            var up = Vector3.Cross(side, along).normalized * thickness * .5f;
+            foreach (var o in new[] { side, up })
+            {
+                Quad(slot, a - o, b - o, b + o, a + o);
+                Quad(slot, a + o, b + o, b - o, a - o);
+            }
+        }
+
         /// <summary>Cone with smooth normals around its side (foliage that should not look faceted).</summary>
         public void SmoothCone(int slot, Vector3 baseCentre, float radius, float height, int sides)
         {

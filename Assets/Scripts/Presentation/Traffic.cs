@@ -270,7 +270,7 @@ namespace Horizonte.Presentation
                 var kerb = from >= 0 ? -Dir(fromDir) : Right(Step(route[0], route[1]));
                 side = Vector3.Dot(Right(Step(route[0], route[1])), kerb) < 0 ? -1 : 1;
             }
-            AddPath(m, route, side * Kerb, SidewalkY);
+            AddWalk(m, route, side, to >= 0 ? toDir : -1);
             if (to >= 0)
             {
                 m.Points.Add(Centre(toRoad) - Dir(toDir) * Kerb + Vector3.up * SidewalkY);
@@ -484,6 +484,56 @@ namespace Horizonte.Presentation
         /// Adds a point per street tile, kept to one side: offset is the sidewalk (people) or the lane (cars) to the right
         /// of the direction of travel. Turns cut through the corner, which also gives people their crossings.
         /// </summary>
+        /// <summary>
+        /// People keep to the sidewalk: they follow it round the corners and change sides only at a junction, on its zebra
+        /// crossing, never in the middle of a street; at a dead end they come back on the same sidewalk. When the place
+        /// they are going is across the street, they cross at the last junction on the way.
+        /// </summary>
+        void AddWalk(Mover m, List<int> route, float side, int endDir)
+        {
+            int n = route.Count;
+            if (n == 0) return;
+            int Into(int k) => k > 0 ? Step(route[k - 1], route[k]) : n > 1 ? Step(route[0], route[1]) : (endDir >= 0 ? (endDir + 1) & 3 : 0);
+            int Out(int k) => k + 1 < n ? Step(route[k], route[k + 1]) : Into(k);
+            bool Back(int k) => Out(k) == ((Into(k) + 2) & 3);
+
+            // The sidewalk the walk would end on; it has to be the one beside the destination.
+            float end = side;
+            for (int k = 0; k < n; k++) if (Back(k)) end = -end;
+            int crossAt = -1;
+            if (endDir >= 0 && Vector3.Dot(Right(Into(n - 1)) * end, -Dir(endDir)) < -.5f)
+                for (int k = n - 1; k >= 0 && crossAt < 0; k--)
+                    if (Junction(route[k])) crossAt = k;
+
+            float s = side;
+            for (int k = 0; k < n; k++)
+            {
+                int a = Into(k), b = Out(k);
+                var c = Centre(route[k]) + Vector3.up * SidewalkY;
+                if (Back(k))
+                {
+                    // Round the end of the street on the same sidewalk.
+                    m.Points.Add(c + Right(a) * s * Kerb);
+                    s = -s;
+                    continue;
+                }
+                m.Points.Add(c + (a == b ? Right(a) : Right(a) + Right(b)) * s * Kerb);
+                if (k != crossAt) continue;
+                // Over the zebra crossing on the street ahead, to the other sidewalk.
+                m.Points.Add(c + Right(b) * s * Kerb + Dir(b) * CityView.CrossingLine);
+                m.Points.Add(c - Right(b) * s * Kerb + Dir(b) * CityView.CrossingLine);
+                s = -s;
+            }
+        }
+
+        /// <summary>A street tile where three or four streets meet; its crossings are painted.</summary>
+        bool Junction(int i)
+        {
+            int x = i % city.Width, y = i / city.Width, links = 0;
+            for (int d = 0; d < 4; d++) if (city.IsRoad(x + City.DX[d], y + City.DY[d])) links++;
+            return links >= 3;
+        }
+
         void AddPath(Mover m, List<int> route, float offset, float y, int skip = 0)
         {
             for (int k = skip; k < route.Count; k++)

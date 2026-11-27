@@ -432,6 +432,7 @@ namespace Horizonte.Tests
 
             // A logging camp needs no street and no power.
             Assert.AreEqual(PlaceResult.Ok, city.Place(Id("puesto_tala"), 10, 14));
+            Assert.AreEqual(PlaceResult.CampLimit, city.CanPlace(Id("puesto_tala"), 12, 16), "one camp per lumberjack");
             Assert.AreEqual(1, Catalog.BuildTicks(Catalog.Get("puesto_tala")) / City.TicksPerHour);
             city.FinishConstruction();
             int camp = city.Index(10, 14);

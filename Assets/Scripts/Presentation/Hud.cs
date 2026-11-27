@@ -587,8 +587,8 @@ namespace Horizonte.Presentation
                     if (!c.RoadConnected[i]) isolated++;
                     continue;
                 }
-                if (!c.Served[i]) noRoad++;
-                if (def.Kind == Kind.Power || !c.Served[i]) continue;
+                if (!c.Served[i] && !def.Standalone) noRoad++;
+                if (def.Kind == Kind.Power || def.PowerSupply > 0 || def.PowerUse <= 0 || !c.Served[i]) continue;
                 consumers++;
                 if (c.Powered[i]) continue;
                 unpowered++;

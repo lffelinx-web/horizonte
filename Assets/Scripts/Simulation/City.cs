@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Horizonte.Simulation
 {
-    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked, NoRoad, NeedsWater, Mountain, Reserve, NoWood, NeedsForest, Trees, NoFront }
+    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked, NoRoad, NeedsWater, Mountain, Reserve, NoWood, NeedsForest, Trees, NoFront, CampLimit }
 
     /// <summary>What happens when the player marks a tree to be felled.</summary>
     public enum FellResult { Ok, NotATree, NoStation, TooFar, AlreadyMarked, Busy }
@@ -202,6 +202,8 @@ namespace Horizonte.Simulation
             if (def == null) return PlaceResult.Occupied;
             var (fw, fh) = Footprint(def, turned);
             if (!IgnoreRequirements && Population < def.MinPopulation) return PlaceResult.Locked;
+            // One logging camp per lumberjack.
+            if (def.Standalone && def.LumberReach > 0 && !IgnoreRequirements && Count(d => d.Standalone && d.LumberReach > 0) >= Lumberjacks) return PlaceResult.CampLimit;
             bool mountain = false, reserve = false, trees = false;
             for (int dy = 0; dy < fh; dy++)
             for (int dx = 0; dx < fw; dx++)
