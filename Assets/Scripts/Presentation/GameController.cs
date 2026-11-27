@@ -26,6 +26,8 @@ namespace Horizonte.Presentation
         public Traffic Traffic { get; private set; }
         public DayNight DayNight { get; private set; }
         public Lumber Lumber { get; private set; }
+        public Signals Signals { get; private set; }
+        public Sound Sound { get; private set; }
 
         /// <summary>Time of day from 0 (midnight) to 1, moving smoothly between ticks.</summary>
         public float TimeOfDay => City == null ? .3f : (City.Tick % City.TicksPerDay + clock) / City.TicksPerDay;
@@ -49,6 +51,9 @@ namespace Horizonte.Presentation
             Traffic = new GameObject("Gente").AddComponent<Traffic>();
             DayNight = gameObject.AddComponent<DayNight>();
             Lumber = new GameObject("Leñadores").AddComponent<Lumber>();
+            Signals = new GameObject("Semáforos").AddComponent<Signals>();
+            Sound = gameObject.AddComponent<Sound>();
+            if (cam.GetComponent<AudioListener>() == null) cam.gameObject.AddComponent<AudioListener>();
             Hud = gameObject.AddComponent<Hud>();
             Placement = gameObject.AddComponent<PlacementController>();
 
@@ -72,6 +77,8 @@ namespace Horizonte.Presentation
             View.Init(City);
             Traffic.Init(City, Rig, View);
             Lumber.Init(City, View);
+            Signals.Init(City);
+            Sound.Init(Rig);
             Rig.Init(cam, new Vector2(City.Width, City.Height) * CityView.TileSize);
             // Start at the entrance, looking west: the highway out of the tunnel into the clearing, forest all around.
             Rig.Focus = CityView.TileCentre(1, City.Height / 2) + new Vector3(-6, 0, 0);
@@ -98,6 +105,8 @@ namespace Horizonte.Presentation
             DayNight.Apply(TimeOfDay, Rig);
             Traffic.Tick(StreetSpeed[speed], TimeOfDay);
             Lumber.Tick(StreetSpeed[speed]);
+            Signals.Tick(StreetSpeed[speed]);
+            Sound.Tick(TimeOfDay, StreetSpeed[speed]);
         }
 
         public void SelectTool(Tool t)

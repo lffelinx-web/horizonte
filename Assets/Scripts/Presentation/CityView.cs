@@ -322,7 +322,14 @@ namespace Horizonte.Presentation
             for (int c = 0; c < chunkFilters.Length; c++) ChooseDetail(c);
             // Warning icons face the camera.
             var cam = Camera.main;
-            if (cam != null) foreach (var w in warnings.Values) if (w != null) w.transform.rotation = cam.transform.rotation;
+            if (cam != null)
+                foreach (var w in warnings.Values)
+                {
+                    if (w == null) continue;
+                    w.transform.rotation = cam.transform.rotation;
+                    // About the same size on screen whatever the zoom.
+                    w.transform.localScale = Vector3.one * Mathf.Clamp(Vector3.Distance(cam.transform.position, w.transform.position) * .028f, 1.6f, 7f);
+                }
         }
 
         void BuildTile(int x, int y)
@@ -453,20 +460,6 @@ namespace Horizonte.Presentation
             int step = northSouth ? y : x;
             // Lamp on one sidewalk, tree on the opposite one, swapping every tile.
             bool lamp = (step & 1) == 0;
-            // Power poles with their cables along the same sidewalk as the lamps: the grid runs along the streets.
-            if (!low)
-            {
-                var along = northSouth ? Vector3.forward : Vector3.right;
-                var across = northSouth ? Vector3.right : Vector3.forward;
-                var pole = new Vector3(x0, h, z0) + (northSouth ? new Vector3(side - .35f, 0, 1.2f) : new Vector3(1.2f, 0, side - .35f));
-                builder.Box(STrunk, pole, new Vector3(.22f, 7.4f, .22f));
-                builder.Box(STrunk, pole + Vector3.up * 7f, across * 1.5f + along * .14f + Vector3.up * .12f);
-                foreach (float o in new[] { -.6f, .6f })
-                {
-                    var start = new Vector3(x0, h, z0) + (northSouth ? new Vector3(side - .35f + o, 7.1f, 0) : new Vector3(0, 7.1f, side - .35f + o));
-                    builder.Box(SLamp, start + along * TileSize * .5f, along * TileSize + across * .035f + Vector3.up * .035f);
-                }
-            }
             if (northSouth)
             {
                 if (lamp) Lamp(new Vector3(x0 + side, h, z0 + mid), Vector3.right);
@@ -800,76 +793,127 @@ namespace Horizonte.Presentation
             if (Time.unscaledTime >= dropsAt) BuildDrops();
         }
 
-        // ---------------------------------------------------------------- service drops
+        // ---------------------------------------------------------------- power poles and service drops
 
         MeshFilter dropsFilter;
-        readonly MeshBuilder dropsMesh = new MeshBuilder(1);
+        readonly MeshBuilder dropsMesh = new MeshBuilder(3);
+        readonly List<Vector3> poleTops = new List<Vector3>();
         float dropsAt;
+        const int PoleSpacing = 3;
+        const float PoleHeight = 7.4f;
 
         /// <summary>
-        /// A cable from the nearest street pole to every building that has power, so it shows at a glance which are
-        /// connected; buildings without power have none.
+        /// The visible grid: a wooden pole every third tile along the straight streets that have power, cables slung
+        /// between them, and from the nearest pole a cable to every building with power, ending at a meter box on its
+        /// front by the door. Streets without power have no poles and buildings without power no cable.
         /// </summary>
         void BuildDrops()
         {
             dropsAt = Time.unscaledTime + 1.5f;
             if (dropsFilter == null)
             {
-                var go = new GameObject("Acometidas", typeof(MeshFilter), typeof(MeshRenderer));
+                var go = new GameObject("Red eléctrica", typeof(MeshFilter), typeof(MeshRenderer));
                 go.transform.SetParent(transform, false);
                 var mr = go.GetComponent<MeshRenderer>();
-                mr.sharedMaterial = Palette.Get("StreetLamp");
-                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                // Wood, cable, metal boxes.
+                mr.sharedMaterials = Palette.Get("Trunk", "StreetLamp", "Metal");
                 dropsFilter = go.GetComponent<MeshFilter>();
                 dropsFilter.sharedMesh = new Mesh();
             }
             dropsMesh.Clear();
+            poleTops.Clear();
+            for (int y = 0; y < city.Height; y++)
+            for (int x = 0; x < city.Width; x++)
+            {
+                if (!Pole(x, y, out var foot, out bool northSouth)) continue;
+                var along = northSouth ? Vector3.forward : Vector3.right;
+                var across = northSouth ? Vector3.right : Vector3.forward;
+                dropsMesh.Box(0, foot, new Vector3(.24f, PoleHeight, .24f));
+                dropsMesh.Box(0, foot + Vector3.up * (PoleHeight - .45f), across * 1.6f + along * .14f + Vector3.up * .13f);
+                var top = foot + Vector3.up * (PoleHeight - .3f);
+                poleTops.Add(top);
+                // Cables to the next pole along the street, sagging between them.
+                int nx = x + (northSouth ? 0 : PoleSpacing), ny = y + (northSouth ? PoleSpacing : 0);
+                if (!Pole(nx, ny, out var nextFoot, out bool nextNs) || nextNs != northSouth || !StraightBetween(x, y, nx, ny)) continue;
+                var nextTop = nextFoot + Vector3.up * (PoleHeight - .3f);
+                foreach (float o in new[] { -.65f, .65f })
+                    Cable(top + across * o, nextTop + across * o, 1.1f);
+            }
+
             foreach (var kv in buildings)
             {
                 int a = kv.Key;
                 var def = city.DefAt(a);
                 var go = kv.Value;
                 if (def == null || go == null || !go.activeInHierarchy || def.PowerUse <= 0 || def.PowerSupply > 0 || !city.Powered[a]) continue;
-                if (!PoleFor(a, out var pole)) continue;
-                var bounds = new Bounds(go.transform.position, Vector3.zero);
-                foreach (var r in go.GetComponentsInChildren<Renderer>()) bounds.Encapsulate(r.bounds);
+                if (!Door(a, out var door)) continue;
                 int rot = city.Rotation[a] & 3;
                 var front = new Vector3(City.DX[rot], 0, City.DY[rot]);
-                float reach = Mathf.Abs(Vector3.Dot(bounds.extents, front)) * .45f;
-                var attach = bounds.center + front * reach;
-                attach.y = Mathf.Clamp(bounds.max.y - .6f, 2.6f, 6.6f);
-                // A slight sag in the middle.
-                var mid = (pole + attach) * .5f + Vector3.down * .45f;
-                dropsMesh.Segment(0, pole, mid, .05f);
-                dropsMesh.Segment(0, mid, attach, .05f);
+                var right = new Vector3(front.z, 0, -front.x);
+                // The meter box on the wall beside the door, and the pipe up to where the cable arrives.
+                var wall = door - front * .35f + right * 1.4f;
+                float attachHeight = 3.3f;
+                dropsMesh.Box(2, wall + Vector3.up * 1.1f + front * .08f, new Vector3(.42f, .55f, .42f) - Abs(front) * .26f);
+                dropsMesh.Box(2, wall + Vector3.up * 1.65f + front * .05f, new Vector3(.07f, attachHeight - 1.65f + .3f, .07f));
+                dropsMesh.Box(2, wall + Vector3.up * attachHeight + front * .2f, new Vector3(.06f, .06f, .06f) + Abs(front) * .4f);
+                var attach = wall + Vector3.up * (attachHeight + .03f) + front * .4f;
+                // From the nearest pole.
+                Vector3 best = default;
+                float bestDistance = float.MaxValue;
+                foreach (var p in poleTops)
+                {
+                    float d = (p - attach).sqrMagnitude;
+                    if (d < bestDistance) { bestDistance = d; best = p; }
+                }
+                if (bestDistance > 40 * 40) continue;
+                Cable(best, attach, .5f);
             }
             dropsFilter.sharedMesh = dropsMesh.ToMesh(dropsFilter.sharedMesh);
         }
 
-        /// <summary>Top of the pole on the street in front of a building (or any straight street beside it).</summary>
-        bool PoleFor(int anchor, out Vector3 top)
+        static Vector3 Abs(Vector3 v) => new Vector3(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
+
+        /// <summary>A cable between two points, hanging lower in the middle.</summary>
+        void Cable(Vector3 a, Vector3 b, float sag)
         {
-            top = default;
-            var (w, h) = city.Size(anchor);
-            int ax = anchor % city.Width, ay = anchor / city.Width, facing = city.Rotation[anchor] & 3;
-            for (int k = 0; k < 4; k++)
+            const int pieces = 4;
+            var previous = a;
+            for (int k = 1; k <= pieces; k++)
             {
-                int d = (facing + k) & 3;
-                int count = d == 0 || d == 2 ? w : h;
-                for (int j = 0; j < count; j++)
-                {
-                    int x = d == 0 || d == 2 ? ax + j : d == 1 ? ax - 1 : ax + w;
-                    int y = d == 1 || d == 3 ? ay + j : d == 0 ? ay - 1 : ay + h;
-                    if (!city.IsRoad(x, y)) continue;
-                    bool s = RoadLinks(x, y, 0), wl = RoadLinks(x, y, 1), n = RoadLinks(x, y, 2), e = RoadLinks(x, y, 3);
-                    bool northSouth = (s || n) && !wl && !e, eastWest = (wl || e) && !s && !n;
-                    if (!northSouth && !eastWest) continue;
-                    const float side = .65f - .35f;
-                    top = new Vector3(x * TileSize, .12f + 7.05f, y * TileSize) + (northSouth ? new Vector3(side, 0, 1.2f) : new Vector3(1.2f, 0, side));
-                    return true;
-                }
+                float t = k / (float)pieces;
+                var p = Vector3.Lerp(a, b, t) + Vector3.down * sag * 4 * t * (1 - t);
+                dropsMesh.Segment(1, previous, p, .045f);
+                previous = p;
             }
-            return false;
+        }
+
+        /// <summary>Whether a pole stands on this tile: every third tile of a straight street that has power.</summary>
+        bool Pole(int x, int y, out Vector3 foot, out bool northSouth)
+        {
+            foot = default;
+            northSouth = false;
+            if (!city.IsRoad(x, y) || !city.PowerCover[city.Index(x, y)]) return false;
+            bool s = RoadLinks(x, y, 0), w = RoadLinks(x, y, 1), n = RoadLinks(x, y, 2), e = RoadLinks(x, y, 3);
+            northSouth = (s || n) && !w && !e;
+            bool eastWest = (w || e) && !s && !n;
+            if (!northSouth && !eastWest) return false;
+            if ((northSouth ? y : x) % PoleSpacing != 0) return false;
+            const float side = .65f - .35f;
+            foot = new Vector3(x * TileSize, .12f, y * TileSize) + (northSouth ? new Vector3(side, 0, 1.2f) : new Vector3(1.2f, 0, side));
+            return true;
+        }
+
+        /// <summary>Whether every tile from one pole to the next is straight street, so the cable follows it.</summary>
+        bool StraightBetween(int x0, int y0, int x1, int y1)
+        {
+            int dx = System.Math.Sign(x1 - x0), dy = System.Math.Sign(y1 - y0);
+            for (int x = x0, y = y0; x != x1 || y != y1; x += dx, y += dy)
+            {
+                if (!city.IsRoad(x, y)) return false;
+                bool s = RoadLinks(x, y, 0), w = RoadLinks(x, y, 1), n = RoadLinks(x, y, 2), e = RoadLinks(x, y, 3);
+                if (dx != 0 ? (s || n) : (w || e)) return false;
+            }
+            return true;
         }
 
         // ---------------------------------------------------------------- warning icons

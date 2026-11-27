@@ -92,7 +92,7 @@ namespace Horizonte.Presentation
         Btn layersButton;
         Text popupTitle, popupBody, taxText, loanText;
         Btn loanButton;
-        Btn newCityButton;
+        Btn newCityButton, soundButton;
         Popup popup;
 
         // Minimap.
@@ -432,7 +432,8 @@ namespace Horizonte.Presentation
             }
 
             settingsRow = At("Opciones", popupPanel, 22, 0, 396, 56);
-            newCityButton = MakeButton(settingsRow, "Nueva ciudad", 0, 0, 396, 56, 14, null, 0, "Empezar una ciudad nueva", 22, NewCity);
+            newCityButton = MakeButton(settingsRow, "Nueva ciudad", 0, 0, 270, 56, 14, null, 0, "Empezar una ciudad nueva", 19, NewCity);
+            soundButton = MakeButton(settingsRow, "Sonido", 280, 0, 116, 56, 14, null, 0, "Sonido: sí", 19, () => { Sound.Muted = !Sound.Muted; FillPopup(); });
             newCityButton.Back.color = new Color(.45f, .14f, .13f, .95f);
             newCityButton.Edge.color = new Color(1, .5f, .45f, .6f);
 
@@ -513,6 +514,8 @@ namespace Horizonte.Presentation
                     popupTitle.text = "Ajustes";
                     popupBody.text = $"Horizonte {Application.version}\n<color=#A9BCE0>La partida se guarda sola cada hora del juego y al salir.</color>";
                     newCityButton.Label.text = Time.unscaledTime < resetArmedUntil ? "Toca otra vez para confirmar" : "Empezar una ciudad nueva";
+                    soundButton.Label.text = Sound.Muted ? "Sonido: no" : "Sonido: sí";
+                    soundButton.Back.color = Sound.Muted ? UiKit.ButtonColor : UiKit.Accent;
                     break;
             }
             float bodyHeight = popupBody.preferredHeight;

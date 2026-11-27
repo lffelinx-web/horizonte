@@ -195,6 +195,8 @@ namespace Horizonte.Presentation
                     }
                     break;
                 case State.Chop:
+                    // A blow of the axe at the top of every swing.
+                    if (Mathf.Floor(w.Timer / .7f) != Mathf.Floor((w.Timer + dt) / .7f)) Sound.At("hacha", t.position, .7f);
                     w.Timer += dt;
                     var aim = (w.Manual ? w.Trees[w.Tree].At : CityView.TileCentre(w.Tile % city.Width, w.Tile / city.Width)) - t.position;
                     aim.y = 0;

@@ -38,8 +38,12 @@ namespace Horizonte.Presentation
             public readonly HashSet<int> Reverse = new HashSet<int>();
             public int Next;
             public float Age, Leaving = -1, Phase;
-            public bool Car, Arriving;
+            public bool Car, Arriving, Truck;
             public int Home = -1;
+            /// <summary>Traffic lights on the way, by the index of the point in the junction: the junction and whether the car goes north-south.</summary>
+            public readonly Dictionary<int, (int tile, bool northSouth)> Gates = new Dictionary<int, (int, bool)>();
+            /// <summary>The point this person was already let through the lights toward.</summary>
+            public int Cleared = -1;
         }
 
         sealed class Garage
@@ -56,6 +60,11 @@ namespace Horizonte.Presentation
         readonly List<Mover> walkers = new List<Mover>();
         readonly Stack<Mover> idleWalkers = new Stack<Mover>();
         readonly Stack<Mover> idleCars = new Stack<Mover>();
+        readonly Stack<Mover> idleTrucks = new Stack<Mover>();
+        /// <summary>Cars and vans on their way to work, home or a delivery.</summary>
+        readonly List<Mover> commuters = new List<Mover>();
+        const int MaxCars = 24;
+        float carDebt;
         readonly Dictionary<int, Garage> garages = new Dictionary<int, Garage>();
         readonly List<int> nearby = new List<int>();
         readonly List<int> scratch = new List<int>();
@@ -64,7 +73,7 @@ namespace Horizonte.Presentation
         uint random = 12345;
 
         GameObject[] carModels;
-        Mesh carMesh;
+        Mesh carMesh, vanMesh;
         Material[][] carLooks;
 
         public void Init(City c, CameraRig r, CityView v)
@@ -109,10 +118,14 @@ namespace Horizonte.Presentation
             if (!visible)
             {
                 for (int k = walkers.Count - 1; k >= 0; k--) Release(walkers[k], k);
+                for (int k = commuters.Count - 1; k >= 0; k--) ReleaseCar(k);
                 return;
             }
 
             if (dt > 0) SpawnWalkers(dt);
+            if (dt > 0) SpawnCars(dt);
+            for (int k = commuters.Count - 1; k >= 0; k--)
+                if (!Move(commuters[k], dt) || TooFar(commuters[k].Go.transform.position)) ReleaseCar(k);
             for (int k = walkers.Count - 1; k >= 0; k--)
                 if (!Move(walkers[k], dt) || TooFar(walkers[k].Go.transform.position)) Release(walkers[k], k);
             UpdateGarages(dt);
@@ -257,6 +270,8 @@ namespace Horizonte.Presentation
             var m = idleWalkers.Count > 0 ? idleWalkers.Pop() : NewWalker();
             m.Points.Clear();
             m.Reverse.Clear();
+            m.Gates.Clear();
+            m.Cleared = -1;
             if (from >= 0)
             {
                 // Out of the front door and down to the sidewalk.
@@ -316,6 +331,76 @@ namespace Horizonte.Presentation
             idleWalkers.Push(m);
         }
 
+        // ---------------------------------------------------------------- traffic
+
+        /// <summary>
+        /// Cars on the streets in step with the people: a third of those heading out go by car, from home to work in the
+        /// morning and back in the evening; and by day delivery vans come and go from shops and factories.
+        /// </summary>
+        void SpawnCars(float dt)
+        {
+            if (nearby.Count == 0) return;
+            int residents = 0, workplaces = 0;
+            foreach (int i in nearby)
+            {
+                var def = city.DefAt(i);
+                if (def.Kind == Kind.Housing) residents += city.Occupants[i];
+                else if (def.Jobs > 0) workplaces++;
+            }
+            float h = TimeOfDay * 24;
+            float vans = h >= 8 && h < 18 ? workplaces * .012f : 0;
+            carDebt += dt * (residents * OutPerHour() / 20f * .35f + vans);
+            while (carDebt >= 1)
+            {
+                carDebt -= 1;
+                if (commuters.Count >= MaxCars) { carDebt = 0; return; }
+                TrySpawnCar(Next() % 100 < 100 * vans / (vans + residents * OutPerHour() / 20f * .35f + .0001f));
+            }
+        }
+
+        void TrySpawnCar(bool van)
+        {
+            bool evening = Evening;
+            int home = van ? -1 : Pick(i => city.DefAt(i).Kind == Kind.Housing ? city.Occupants[i] : 0);
+            int work = Pick(i => i != home && city.DefAt(i).Kind != Kind.Housing && city.DefAt(i).Jobs > 0 ? Mathf.Min(8, 1 + city.DefAt(i).Jobs / 6f) : 0);
+            int from = van ? work : home;
+            if (from < 0 || !Front(from, out int fromRoad, out _)) return;
+            var route = new List<int>();
+            int to = van ? Pick(i => i != from ? 1 : 0) : work;
+            if (to < 0 || !Front(to, out int toRoad, out _) || !Route(fromRoad, toRoad, 60, route) || route.Count < 3)
+                Wander(fromRoad, 10 + (int)(Next() % 8), route);
+            if (route.Count < 2) return;
+            // In the evening the trip runs the other way: from work back home.
+            if (evening && !van) route.Reverse();
+
+            var m = van ? (idleTrucks.Count > 0 ? idleTrucks.Pop() : NewCar(true)) : (idleCars.Count > 0 ? idleCars.Pop() : NewCar());
+            m.Points.Clear();
+            m.Reverse.Clear();
+            m.Gates.Clear();
+            m.Cleared = -1;
+            m.Home = -1;
+            SetLook(m, Next());
+            AddPath(m, route, Lane, RoadY);
+            m.Next = 1;
+            m.Age = 0;
+            m.Leaving = -1;
+            m.Arriving = false;
+            m.Go.transform.position = m.Points[0];
+            m.Go.transform.rotation = Quaternion.LookRotation(m.Points[1] - m.Points[0]);
+            m.Go.transform.localScale = Vector3.one;
+            m.Go.SetActive(true);
+            commuters.Add(m);
+        }
+
+        void ReleaseCar(int index)
+        {
+            var m = commuters[index];
+            m.Go.SetActive(false);
+            m.Points.Clear();
+            commuters.RemoveAt(index);
+            (m.Truck ? idleTrucks : idleCars).Push(m);
+        }
+
         // ---------------------------------------------------------------- cars
 
         void UpdateGarages(float dt)
@@ -348,6 +433,8 @@ namespace Horizonte.Presentation
             var m = idleCars.Count > 0 ? idleCars.Pop() : NewCar();
             m.Points.Clear();
             m.Reverse.Clear();
+            m.Gates.Clear();
+            m.Cleared = -1;
             m.Home = home;
             m.Go.transform.position = spot;
             m.Go.transform.rotation = Quaternion.LookRotation(spot - driveway);
@@ -368,6 +455,8 @@ namespace Horizonte.Presentation
             var (spot, driveway) = Spots(home);
             m.Points.Clear();
             m.Reverse.Clear();
+            m.Gates.Clear();
+            m.Cleared = -1;
             m.Points.Add(spot);
             // Backs out of the garage into the street, then drives off.
             m.Points.Add(driveway);
@@ -394,6 +483,8 @@ namespace Horizonte.Presentation
             var m = idleCars.Count > 0 ? idleCars.Pop() : NewCar();
             m.Points.Clear();
             m.Reverse.Clear();
+            m.Gates.Clear();
+            m.Cleared = -1;
             m.Home = home;
             SetLook(m, CityView.Hash(home, 5));
             AddPath(m, route, Lane, RoadY);
@@ -447,9 +538,30 @@ namespace Horizonte.Presentation
 
             float step = (m.Car ? (m.Reverse.Contains(m.Next) ? ReverseSpeed : CarSpeed) : WalkSpeed) * dt;
             var p = t.position;
+            // Keep a distance from the car ahead.
+            if (m.Car && Blocked(m, p)) step = 0;
+            bool waiting = false;
             while (step > 0 && m.Next < m.Points.Count)
             {
                 var target = m.Points[m.Next];
+                var lights = Signals.Instance;
+                if (m.Car && lights != null && m.Gates.TryGetValue(m.Next, out var gate) && lights.State(gate.tile, gate.northSouth) != Signals.Light.Green)
+                {
+                    // Stop at the line before the junction, unless already past it.
+                    float toPoint = Vector3.Distance(p, target);
+                    if (toPoint > StopBack - .8f)
+                    {
+                        float room = toPoint - StopBack;
+                        if (room <= .02f) { waiting = true; break; }
+                        step = Mathf.Min(step, room);
+                    }
+                }
+                if (!m.Car && lights != null && m.Cleared != m.Next)
+                {
+                    // People wait at the kerb until the traffic going their way has green.
+                    if (CrossingAhead(m, out int tile, out bool northSouth) && !lights.CanWalk(tile, northSouth)) { waiting = true; break; }
+                    m.Cleared = m.Next;
+                }
                 float d = Vector3.Distance(p, target);
                 if (d > step)
                 {
@@ -471,7 +583,7 @@ namespace Horizonte.Presentation
             if (m.Reverse.Contains(m.Next)) heading = -heading;
             if (heading.sqrMagnitude > .001f)
                 t.rotation = Quaternion.RotateTowards(t.rotation, Quaternion.LookRotation(heading), (m.Car ? 160 : 420) * dt);
-            if (!m.Car && m.Body != null)
+            if (!m.Car && m.Body != null && !waiting)
             {
                 // A light bob in step with walking.
                 m.Phase += dt * 9;
@@ -526,6 +638,58 @@ namespace Horizonte.Presentation
             }
         }
 
+        /// <summary>Metres before the middle of a junction where cars stop on red: just short of its edge.</summary>
+        const float StopBack = 6.2f;
+
+        /// <summary>Whether another car is just ahead, in the way.</summary>
+        bool Blocked(Mover m, Vector3 p)
+        {
+            var ahead = m.Go.transform.forward;
+            if (m.Reverse.Contains(m.Next)) return false;
+            foreach (var other in Driving())
+            {
+                if (other == m) continue;
+                var v = other.Go.transform.position - p;
+                v.y = 0;
+                float d = v.magnitude;
+                if (d < 7.5f && d > .01f && Vector3.Dot(v / d, ahead) > .82f) return true;
+            }
+            return false;
+        }
+
+        IEnumerable<Mover> Driving()
+        {
+            foreach (var c in commuters) yield return c;
+            foreach (var g in garages.Values) if (g.Car != null && g.Car.Points.Count > 0) yield return g.Car;
+        }
+
+        /// <summary>
+        /// Whether the next bit of a walk crosses a street at a junction with lights, and which way: people go when the
+        /// traffic along their own direction has green.
+        /// </summary>
+        bool CrossingAhead(Mover m, out int tile, out bool northSouth)
+        {
+            tile = -1;
+            northSouth = false;
+            if (m.Next < 1 || m.Next >= m.Points.Count) return false;
+            var a = m.Points[m.Next - 1];
+            var b = m.Points[m.Next];
+            var move = b - a;
+            move.y = 0;
+            if (move.magnitude < 2) return false;
+            foreach (var p in new[] { a, b })
+            {
+                int x = Mathf.FloorToInt(p.x / CityView.TileSize), y = Mathf.FloorToInt(p.z / CityView.TileSize);
+                if (!city.InBounds(x, y)) continue;
+                int i = city.Index(x, y);
+                if (!Signals.Instance.IsJunction(i)) continue;
+                tile = i;
+                northSouth = Mathf.Abs(move.z) > Mathf.Abs(move.x);
+                return true;
+            }
+            return false;
+        }
+
         /// <summary>A street tile where three or four streets meet; its crossings are painted.</summary>
         bool Junction(int i)
         {
@@ -541,6 +705,8 @@ namespace Horizonte.Presentation
                 int a = k > 0 ? Step(route[k - 1], route[k]) : (route.Count > 1 ? Step(route[0], route[1]) : 0);
                 int b = k + 1 < route.Count ? Step(route[k], route[k + 1]) : a;
                 var side = a == b ? Right(a) : Right(a) + Right(b);
+                // Traffic lights at the junctions on the way, for the direction the car comes in.
+                if (k > 0 && Signals.Instance != null && Signals.Instance.IsJunction(route[k])) m.Gates[m.Points.Count] = (route[k], a == 0 || a == 2);
                 m.Points.Add(Centre(route[k]) + side * offset + Vector3.up * y);
             }
         }
@@ -690,6 +856,16 @@ namespace Horizonte.Presentation
             b.Box(3, new Vector3(.6f, .55f, 2.08f), new Vector3(.36f, .16f, .06f));
             carMesh = b.ToMesh();
 
+            b = new MeshBuilder(4);
+            // Delivery van: cab in front, a tall white box behind.
+            b.Box(0, new Vector3(0, .32f, 1.75f), new Vector3(1.9f, 1.35f, 1.5f));
+            b.Box(1, new Vector3(0, 1.1f, 2.36f), new Vector3(1.7f, .5f, .3f));
+            b.Box(3, new Vector3(0, .32f, -.75f), new Vector3(2f, 2.1f, 3.5f));
+            foreach (float x in new[] { -.86f, .86f })
+            foreach (float z in new[] { -1.8f, 1.6f })
+                b.Box(2, new Vector3(x, 0, z), new Vector3(.28f, .7f, .7f));
+            vanMesh = b.ToMesh();
+
             var bodies = new[] { "#C8302E", "#F2F2EE", "#2B5C9E", "#3A3D42", "#E2B13C", "#7FA7C9" };
             var glass = Colour("#1E2B38", .85f);
             var tyre = Colour("#1A1A1A");
@@ -706,13 +882,18 @@ namespace Horizonte.Presentation
             return new Mover { Go = go, Body = go.transform.GetChild(0) };
         }
 
-        Mover NewCar()
+        Mover NewCar(bool van = false)
         {
-            var go = new GameObject("Coche");
+            var go = new GameObject(van ? "Camioneta" : "Coche");
             go.transform.SetParent(transform, false);
-            var m = new Mover { Go = go, Car = true };
+            var m = new Mover { Go = go, Car = true, Truck = van };
             GameObject body;
-            if (carModels.Length > 0)
+            if (van)
+            {
+                body = new GameObject("Carrocería", typeof(MeshFilter), typeof(MeshRenderer));
+                body.GetComponent<MeshFilter>().sharedMesh = vanMesh;
+            }
+            else if (carModels.Length > 0)
             {
                 body = Instantiate(carModels[Next() % (uint)carModels.Length]);
                 // Models face -Z like buildings; cars here drive toward +Z.
@@ -730,6 +911,12 @@ namespace Horizonte.Presentation
 
         void SetLook(Mover m, uint seed)
         {
+            if (m.Truck)
+            {
+                var look = carLooks[seed % (uint)carLooks.Length];
+                m.Body.GetComponent<MeshRenderer>().sharedMaterials = new[] { look[0], look[1], look[2], Colour("#F4F4F0", .3f) };
+                return;
+            }
             if (carModels.Length > 0) return;
             m.Body.GetComponent<MeshRenderer>().sharedMaterials = carLooks[seed % (uint)carLooks.Length];
         }

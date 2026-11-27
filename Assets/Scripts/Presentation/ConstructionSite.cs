@@ -237,9 +237,17 @@ namespace Horizonte.Presentation
             return go;
         }
 
+        float hammerAt;
+
         void Update()
         {
             shown = Mathf.MoveTowards(shown, target, Time.deltaTime * .2f);
+            // Hammering now and then while the work goes on.
+            if (shown < ScaffoldDown && Time.time >= hammerAt)
+            {
+                hammerAt = Time.time + .7f + Next() % 100 / 50f;
+                Sound.At("martillo", transform.position, .45f);
+            }
             Apply();
             MoveWorkers(Time.deltaTime);
         }

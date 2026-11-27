@@ -27,6 +27,7 @@ namespace Horizonte.Presentation
             go.transform.position = at + new Vector3((seed & 7) * .3f - 1, 0, ((seed >> 3) & 7) * .3f - 1);
             go.GetComponent<MeshFilter>().sharedMesh = mesh;
             go.GetComponent<MeshRenderer>().sharedMaterials = Palette.Get("Leaves", "Trunk");
+            Sound.At("caida", at, .8f);
             var tree = go.AddComponent<FallingTree>();
             float angle = seed % 360 * Mathf.Deg2Rad;
             tree.axis = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
@@ -35,6 +36,7 @@ namespace Horizonte.Presentation
         /// <summary>Brings down a tree already standing in the world, falling toward a direction on the ground.</summary>
         public static void Topple(GameObject tree, Vector3 toward)
         {
+            Sound.At("caida", tree.transform.position, .8f);
             var fall = tree.AddComponent<FallingTree>();
             fall.axis = Vector3.Cross(Vector3.up, toward);
         }
