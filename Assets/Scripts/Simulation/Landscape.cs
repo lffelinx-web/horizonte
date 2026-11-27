@@ -54,8 +54,18 @@ namespace Horizonte.Simulation
             float hills = 0;
             if (outside > 0)
                 hills = SmoothStep(3, 16, outside) * (5 + 26 * Noise(x * .05f, y * .05f, seed + 17) + 8 * Noise(x * .16f, y * .16f, seed + 23));
-            return Math.Max(0, Math.Max(mountain, hills) * river * road);
+            // A ridge along the west edge; the highway goes through it in a tunnel, in a cutting up to the portal.
+            float ridge = 0;
+            if (x < 0)
+            {
+                ridge = SmoothStep(1.6f, 5.5f, -x) * (34 + 16 * Noise(x * .08f, y * .08f, seed + 29));
+                if (x > -TunnelPortal - .3f && Math.Abs(y - (HighwayY(height) + .5f)) < 1.2f) ridge = 0;
+            }
+            return Math.Max(0, Math.Max(Math.Max(mountain, hills) * river * road, ridge * river));
         }
+
+        /// <summary>How far outside the west edge (in tiles) the tunnel the highway comes through opens.</summary>
+        public const float TunnelPortal = 2f;
 
         public static bool IsMountain(uint seed, int width, int height, int x, int y) =>
             Height(seed, width, height, x + .5f, y + .5f) > MountainLine;

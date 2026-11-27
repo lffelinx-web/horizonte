@@ -24,6 +24,13 @@ namespace Horizonte.Presentation
             b.Ellipsoid(leaves, at + (Vector3.up * 4.1f + side * .8f) * size, new Vector3(1.4f, 1.25f, 1.4f) * size, 6, 4);
         }
 
+        /// <summary>A tree as seen from far away: one smooth crown and no trunk, a fraction of the vertices.</summary>
+        public static void Far(MeshBuilder b, int leaves, Vector3 at, float size, bool broad)
+        {
+            if (broad) b.Ellipsoid(leaves, at + Vector3.up * 3.3f * size, new Vector3(2.1f, 1.9f, 2.1f) * size, 6, 3);
+            else b.SmoothCone(leaves, at + Vector3.up * .5f * size, 1.8f * size, 6.2f * size, 6);
+        }
+
         /// <summary>A young tree growing back where the forest was felled.</summary>
         public static void Sapling(MeshBuilder b, int leaves, int trunk, Vector3 at, float size)
         {

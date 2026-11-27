@@ -109,7 +109,7 @@ namespace Horizonte.Presentation
         public static string CostLabel(Tool t)
         {
             if (t.IsExplore) return "";
-            if (t.IsFell) return $"{Catalog.WoodPerTree} de madera por árbol";
+            if (t.IsFell) return $"{Catalog.WoodPerTree} de madera por casilla";
             if (t.IsBulldoze) return $"$ {Catalog.BulldozeCost} por casilla";
             var def = t.Def;
             return def.IsRoad ? $"$ {Hud.N(def.Cost)} por casilla" : def.Wood > 0 ? $"$ {Hud.N(def.Cost)} + {def.Wood} madera" : $"$ {Hud.N(def.Cost)}";
@@ -135,7 +135,7 @@ namespace Horizonte.Presentation
                 case Shape.Line: return $"{Label(t)}  ·  {CostLabel(t)}  ·  arrastra para trazar";
                 case Shape.Rect:
                     return t.IsFell
-                        ? "Talar  ·  toca árboles o arrastra para marcar varios  ·  el leñador del puesto de tala los corta"
+                        ? "Talar  ·  toca una casilla de bosque  ·  cada leñador tala una a la vez"
                         : $"Demoler  ·  {CostLabel(t)}  ·  arrastra sobre lo que quieras quitar";
                 case Shape.Single:
                     var def = t.Def;

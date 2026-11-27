@@ -163,6 +163,9 @@ namespace Horizonte.Presentation
             chunksX = Mathf.CeilToInt(city.Width / (float)ChunkSize);
             chunksY = Mathf.CeilToInt(city.Height / (float)ChunkSize);
             chunkFilters = new MeshFilter[chunksX * chunksY];
+            chunkNear = new Mesh[chunkFilters.Length];
+            chunkFar = new Mesh[chunkFilters.Length];
+            felling.Clear();
             var mats = Palette.Get(GroundMaterials);
             for (int i = 0; i < chunkFilters.Length; i++)
             {
@@ -248,15 +251,46 @@ namespace Horizonte.Presentation
 
         // ---------------------------------------------------------------- ground
 
+        /// <summary>Building the simplified version of a chunk, for when it is far from the camera.</summary>
+        bool low;
+        Mesh[] chunkNear, chunkFar;
+        /// <summary>Chunks further than this from the camera use their simplified version.</summary>
+        const float FarDistance = 230;
+
+        /// <summary>Each chunk in two versions: full detail, and one with simple trees for when it is far away.</summary>
         void BuildChunk(int c)
         {
-            builder.Clear();
             int cx = c % chunksX, cy = c / chunksX;
-            for (int y = cy * ChunkSize; y < Mathf.Min(city.Height, (cy + 1) * ChunkSize); y++)
-            for (int x = cx * ChunkSize; x < Mathf.Min(city.Width, (cx + 1) * ChunkSize); x++)
-                BuildTile(x, y);
-            var mf = chunkFilters[c];
-            mf.sharedMesh = builder.ToMesh(mf.sharedMesh);
+            for (int pass = 0; pass < 2; pass++)
+            {
+                low = pass == 1;
+                builder.Clear();
+                for (int y = cy * ChunkSize; y < Mathf.Min(city.Height, (cy + 1) * ChunkSize); y++)
+                for (int x = cx * ChunkSize; x < Mathf.Min(city.Width, (cx + 1) * ChunkSize); x++)
+                    BuildTile(x, y);
+                if (low) chunkFar[c] = builder.ToMesh(chunkFar[c]);
+                else chunkNear[c] = builder.ToMesh(chunkNear[c]);
+            }
+            low = false;
+            chunkFilters[c].sharedMesh = null;
+            ChooseDetail(c);
+        }
+
+        void ChooseDetail(int c)
+        {
+            var cam = Camera.main;
+            float half = ChunkSize * TileSize * .5f;
+            var centre = new Vector3((c % chunksX) * ChunkSize * TileSize + half, 0, (c / chunksX) * ChunkSize * TileSize + half);
+            // Distance to the nearest point of the chunk, not its centre, so a chunk right under the camera stays detailed.
+            float d = cam == null ? 0 : Mathf.Max(0, Vector3.Distance(cam.transform.position, centre) - half * 1.2f);
+            var mesh = d > FarDistance ? chunkFar[c] : chunkNear[c];
+            if (chunkFilters[c].sharedMesh != mesh) chunkFilters[c].sharedMesh = mesh;
+        }
+
+        void LateUpdate()
+        {
+            if (chunkFilters == null) return;
+            for (int c = 0; c < chunkFilters.Length; c++) ChooseDetail(c);
         }
 
         void BuildTile(int x, int y)
@@ -389,13 +423,19 @@ namespace Horizonte.Presentation
             if (northSouth)
             {
                 if (lamp) Lamp(new Vector3(x0 + side, h, z0 + mid), Vector3.right);
-                else Trees.Broadleaf(builder, SLeavesLight, STrunk, new Vector3(x0 + TileSize - side, h, z0 + mid), .42f, Hash(x, y));
+                else StreetTree(new Vector3(x0 + TileSize - side, h, z0 + mid), Hash(x, y));
             }
             else
             {
                 if (lamp) Lamp(new Vector3(x0 + mid, h, z0 + side), Vector3.forward);
-                else Trees.Broadleaf(builder, SLeavesLight, STrunk, new Vector3(x0 + mid, h, z0 + TileSize - side), .42f, Hash(x, y));
+                else StreetTree(new Vector3(x0 + mid, h, z0 + TileSize - side), Hash(x, y));
             }
+        }
+
+        void StreetTree(Vector3 at, uint seed)
+        {
+            if (low) Trees.Far(builder, SLeavesLight, at, .42f, true);
+            else Trees.Broadleaf(builder, SLeavesLight, STrunk, at, .42f, seed);
         }
 
         void Lamp(Vector3 at, Vector3 towardRoad)
@@ -419,6 +459,36 @@ namespace Horizonte.Presentation
         /// </summary>
         void BuildTrees(int x, int y, Simulation.Terrain terrain)
         {
+            // While a lumberjack works the tile its trees stand as separate objects (see BeginFelling).
+            if (felling.ContainsKey(city.Index(x, y))) return;
+            foreach (var t in TreesOn(x, y))
+            {
+                switch (terrain)
+                {
+                    case Simulation.Terrain.Stumps: if (!low) Trees.Stump(builder, STrunk, SCut, t.At, t.Size); break;
+                    case Simulation.Terrain.Sapling: Trees.Sapling(builder, SLeavesLight, STrunk, t.At, t.Size); break;
+                    default:
+                        if (low) Trees.Far(builder, t.Broad ? SLeavesLight : SLeaves, t.At, t.Broad ? t.Size * .9f : t.Size, t.Broad);
+                        else if (t.Broad) Trees.Broadleaf(builder, SLeavesLight, STrunk, t.At, t.Size * .9f, t.Seed);
+                        else Trees.Conifer(builder, SLeaves, STrunk, t.At, t.Size);
+                        break;
+                }
+            }
+        }
+
+        /// <summary>One tree of a forest tile: where it stands, how big it is, and whether it is broadleaf.</summary>
+        public struct TreeSpot
+        {
+            public Vector3 At;
+            public float Size;
+            public bool Broad;
+            public uint Seed;
+        }
+
+        /// <summary>The two to four trees of a forest tile, always the same for the same tile.</summary>
+        public static List<TreeSpot> TreesOn(int x, int y)
+        {
+            var list = new List<TreeSpot>(4);
             uint h = Hash(x, y);
             int count = 2 + (int)(h % 3);
             for (int k = 0; k < count; k++)
@@ -426,18 +496,73 @@ namespace Horizonte.Presentation
                 h = h * 1664525u + 1013904223u;
                 float px = (x + .15f + (h & 0xFF) / 255f * .7f) * TileSize;
                 float pz = (y + .15f + ((h >> 8) & 0xFF) / 255f * .7f) * TileSize;
-                float size = .8f + ((h >> 16) & 0xFF) / 255f * .5f;
-                var at = new Vector3(px, 0, pz);
-                switch (terrain)
-                {
-                    case Simulation.Terrain.Stumps: Trees.Stump(builder, STrunk, SCut, at, size); break;
-                    case Simulation.Terrain.Sapling: Trees.Sapling(builder, SLeavesLight, STrunk, at, size); break;
-                    default:
-                        if ((h >> 24) % 10 < 3) Trees.Broadleaf(builder, SLeavesLight, STrunk, at, size * .9f, h);
-                        else Trees.Conifer(builder, SLeaves, STrunk, at, size);
-                        break;
-                }
+                list.Add(new TreeSpot { At = new Vector3(px, 0, pz), Size = .8f + ((h >> 16) & 0xFF) / 255f * .5f, Broad = (h >> 24) % 10 < 3, Seed = h });
             }
+            return list;
+        }
+
+        // ---------------------------------------------------------------- felling, tree by tree
+
+        /// <summary>Tiles a lumberjack is working, with their trees as separate objects (null once felled).</summary>
+        readonly Dictionary<int, GameObject[]> felling = new Dictionary<int, GameObject[]>();
+
+        /// <summary>Takes the trees of a tile out of the ground mesh so the lumberjack can fell them one by one.</summary>
+        public List<TreeSpot> BeginFelling(int i)
+        {
+            int x = i % city.Width, y = i / city.Width;
+            var spots = TreesOn(x, y);
+            if (felling.ContainsKey(i)) return spots;
+            var trees = new GameObject[spots.Count];
+            for (int k = 0; k < spots.Count; k++) trees[k] = StandingTree(spots[k]);
+            felling[i] = trees;
+            MarkChunk(x, y);
+            RebuildDirty();
+            return spots;
+        }
+
+        /// <summary>Brings one tree of the tile down, falling away from the lumberjack, and leaves its stump.</summary>
+        public void FellOne(int i, int k, Vector3 from)
+        {
+            if (!felling.TryGetValue(i, out var trees) || k < 0 || k >= trees.Length || trees[k] == null) return;
+            var tree = trees[k];
+            var away = tree.transform.position - from;
+            away.y = 0;
+            FallingTree.Topple(tree, away.sqrMagnitude > .01f ? away.normalized : Vector3.forward);
+            var spot = TreesOn(i % city.Width, i / city.Width)[k];
+            var b = new MeshBuilder(2);
+            Trees.Stump(b, 0, 1, Vector3.zero, spot.Size);
+            var stump = new GameObject("Tocón", typeof(MeshFilter), typeof(MeshRenderer));
+            stump.transform.SetParent(tree.transform.parent, false);
+            stump.transform.position = spot.At;
+            stump.GetComponent<MeshFilter>().sharedMesh = b.ToMesh();
+            stump.GetComponent<MeshRenderer>().sharedMaterials = Palette.Get("Trunk", "StumpCut");
+            trees[k] = stump;
+        }
+
+        /// <summary>The tile is done (or abandoned): the ground mesh draws it again, as stumps or as forest.</summary>
+        public void EndFelling(int i)
+        {
+            if (!felling.TryGetValue(i, out var trees)) return;
+            foreach (var t in trees)
+                if (t != null && t.GetComponent<FallingTree>() == null) Destroy(t);
+            felling.Remove(i);
+            // Felled tree by tree already: no extra falling tree when the map notices the stumps.
+            drawnTerrain[i] = city.Terrain[i];
+            MarkChunk(i % city.Width, i / city.Width);
+            RebuildDirty();
+        }
+
+        GameObject StandingTree(TreeSpot spot)
+        {
+            var b = new MeshBuilder(2);
+            if (spot.Broad) Trees.Broadleaf(b, 0, 1, Vector3.zero, spot.Size * .9f, spot.Seed);
+            else Trees.Conifer(b, 0, 1, Vector3.zero, spot.Size);
+            var go = new GameObject("Árbol", typeof(MeshFilter), typeof(MeshRenderer));
+            go.transform.SetParent(transform, false);
+            go.transform.position = spot.At;
+            go.GetComponent<MeshFilter>().sharedMesh = b.ToMesh();
+            go.GetComponent<MeshRenderer>().sharedMaterials = Palette.Get(spot.Broad ? "LeavesLight" : "Leaves", "Trunk");
+            return go;
         }
 
         public static void Tree(MeshBuilder b, int leaves, int trunk, Vector3 at, float size) => Trees.Conifer(b, leaves, trunk, at, size);

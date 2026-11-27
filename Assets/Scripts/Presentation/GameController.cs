@@ -73,10 +73,10 @@ namespace Horizonte.Presentation
             Traffic.Init(City, Rig, View);
             Lumber.Init(City, View);
             Rig.Init(cam, new Vector2(City.Width, City.Height) * CityView.TileSize);
-            // Start at the entrance: the highway arriving at the first block, the grove beside it, the mountains behind.
-            Rig.Focus = CityView.TileCentre(CityGenerator.EntranceEnd(City.Width) - 2, City.Height / 2 + 3);
-            Rig.Yaw = 335;
-            Rig.Distance = 170;
+            // Start at the entrance, looking west: the highway out of the tunnel into the clearing, forest all around.
+            Rig.Focus = CityView.TileCentre(1, City.Height / 2) + new Vector3(-6, 0, 0);
+            Rig.Yaw = 285;
+            Rig.Distance = 120;
             UpdateReach();
         }
 

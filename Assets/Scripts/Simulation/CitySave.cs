@@ -6,8 +6,8 @@ namespace Horizonte.Simulation
     [Serializable]
     public sealed class CitySave
     {
-        /// <summary>Version 3: five-minute ticks, wood and the forest reserve (2 had days; 1 had zones).</summary>
-        public const int CurrentVersion = 3;
+        /// <summary>Version 4: the map with the tunnel entrance and closed forest (3 had the long highway; 2 had days; 1 zones).</summary>
+        public const int CurrentVersion = 4;
 
         public int version = CurrentVersion;
         public int width, height;

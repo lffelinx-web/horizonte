@@ -270,7 +270,7 @@ namespace Horizonte.Presentation
                 preview.Flat(ok ? 0 : 1, x0, z0, x0 + w, z0 + d, lift);
             }
             previewFilter.sharedMesh = preview.ToMesh(previewFilter.sharedMesh);
-            if (Tool.IsFell) hud.ShowCost(count == 0 ? null : $"Talar · {count} {(count == 1 ? "árbol" : "árboles")} · {count * Catalog.WoodPerTree} de madera");
+            if (Tool.IsFell) hud.ShowCost(count == 0 ? null : $"Talar · {count} {(count == 1 ? "casilla" : "casillas")} · {count * Catalog.WoodPerTree} de madera");
             else hud.ShowCost(count == 0 ? null : $"{Tools.Label(Tool)} · {count} {(count == 1 ? "casilla" : "casillas")} · ${total:N0}");
         }
 
@@ -296,10 +296,11 @@ namespace Horizonte.Presentation
                     else if (r != FellResult.NotATree && r != FellResult.AlreadyMarked) why = r;
                     else if (why == FellResult.NotATree && r == FellResult.AlreadyMarked) why = r;
                 }
-                if (marked > 0) hud.Toast($"{marked} {(marked == 1 ? "árbol marcado" : "árboles marcados")} para talar");
+                if (marked > 0) hud.Toast($"{marked} {(marked == 1 ? "casilla marcada" : "casillas marcadas")} para talar");
                 else hud.Toast(why == FellResult.NoStation ? "Primero pon un puesto de tala temporal cerca de los árboles (Industria)"
                     : why == FellResult.TooFar ? "Ese árbol queda lejos de tu puesto de tala"
-                    : why == FellResult.AlreadyMarked ? "Ese árbol ya está marcado"
+                    : why == FellResult.Busy ? BusyMessage()
+                    : why == FellResult.AlreadyMarked ? "Esa casilla ya está marcada"
                     : "Toca los árboles que quieras talar");
                 return;
             }
@@ -312,6 +313,13 @@ namespace Horizonte.Presentation
             }
             int placed = city.PlaceMany(Tool.Building, shape, out var problem, turned);
             if (problem != PlaceResult.Ok && (placed == 0 || problem == PlaceResult.NoMoney || problem == PlaceResult.NoWood)) hud.Toast(Message(problem));
+        }
+
+        string BusyMessage()
+        {
+            var c = game.City;
+            string more = c.NextLumberjackAt > 0 ? $" · con {c.NextLumberjackAt} habitantes tendrás otro" : "";
+            return c.Lumberjacks == 1 ? $"Tu leñador ya tiene una casilla: espera a que termine{more}" : $"Tus {c.Lumberjacks} leñadores ya tienen casilla{more}";
         }
 
         string Message(PlaceResult r)

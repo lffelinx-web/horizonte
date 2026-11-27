@@ -20,6 +20,8 @@ namespace Horizonte.Presentation
             for (int x = cx - 18; x <= cx; x += 6) Road(city, City.Line(x, cy - 10, x, cy + 10));
             for (int y = cy - 10; y <= cy + 10; y += 5) Road(city, City.Line(cx - 18, y, cx, y));
             Road(city, City.Line(cx - 22, cy - 10, cx - 18, cy - 10));
+            // From the end of the highway out of the tunnel to the town.
+            Road(city, City.Line(CityGenerator.EntranceEnd(city.Width), cy, cx - 18, cy));
             Try(city, "central_termoelectrica", cx - 22, cy - 9);
             Try(city, "subestacion", cx - 11, cy - 4);
             Try(city, "subestacion", cx - 7, cy + 4);

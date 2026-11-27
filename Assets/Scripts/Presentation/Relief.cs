@@ -218,18 +218,38 @@ namespace Horizonte.Presentation
             river.GetComponent<MeshFilter>().sharedMesh = water.ToMesh();
             river.GetComponent<MeshRenderer>().sharedMaterial = Palette.Get("Water");
 
-            var road = new MeshBuilder(2);
-            float zc = (Landscape.HighwayY(h) + .5f) * T;
-            // The highway comes in from the west; the way east is for the player to build.
-            foreach (var (from, to) in new[] { (-reach, 0f) })
+            Tunnel(parent, (Landscape.HighwayY(h) + .5f) * T);
+        }
+
+        /// <summary>
+        /// Where the highway comes into the map: out of a tunnel in the ridge along the west edge, through a cutting with
+        /// retaining walls. The concrete portal frames a dark mouth.
+        /// </summary>
+        static void Tunnel(Transform parent, float zc)
+        {
+            const float T = CityView.TileSize;
+            float portal = -Landscape.TunnelPortal * T;
+            // Slots: asphalt, lane line, concrete, the dark inside.
+            var b = new MeshBuilder(4);
+            b.Flat(0, portal - 1, zc - 3.7f, 0, zc + 3.7f, .03f);
+            for (float x = portal + .3f; x + 1.4f < 0; x += 2.8f) b.Flat(1, x, zc - .14f, x + 1.4f, zc + .14f, .045f);
+            // Retaining walls along the cutting, lower toward the town.
+            for (int k = 0; k < 6; k++)
             {
-                road.Flat(0, from, zc - 3.7f, to, zc + 3.7f, .03f);
-                for (float x = from + .3f; x + 1.4f < to; x += 2.8f) road.Flat(1, x, zc - .14f, x + 1.4f, zc + .14f, .045f);
+                float x0 = portal + k * 2.5f, height = Mathf.Lerp(7.5f, 1.2f, k / 5f);
+                b.Box(2, new Vector3(x0 + 1.25f, 0, zc - 5.2f), new Vector3(2.5f, height, .7f));
+                b.Box(2, new Vector3(x0 + 1.25f, 0, zc + 5.2f), new Vector3(2.5f, height, .7f));
             }
-            var highway = new GameObject("Carretera lejana", typeof(MeshFilter), typeof(MeshRenderer));
-            highway.transform.SetParent(parent, false);
-            highway.GetComponent<MeshFilter>().sharedMesh = road.ToMesh();
-            highway.GetComponent<MeshRenderer>().sharedMaterials = Palette.Get("Asphalt", "LaneLine");
+            // Portal: two piers and a deep lintel around the mouth, and the dark tunnel behind.
+            b.Box(2, new Vector3(portal - .6f, 0, zc - 5f), new Vector3(1.6f, 8.6f, 1.4f));
+            b.Box(2, new Vector3(portal - .6f, 0, zc + 5f), new Vector3(1.6f, 8.6f, 1.4f));
+            b.Box(2, new Vector3(portal - .6f, 6.2f, zc), new Vector3(1.6f, 2.4f, 11.4f));
+            b.Box(2, new Vector3(portal - .2f, 8.6f, zc), new Vector3(.8f, .5f, 12f));
+            b.Box(3, new Vector3(portal - 9, 0, zc), new Vector3(16, 6.4f, 8.6f));
+            var go = new GameObject("Túnel", typeof(MeshFilter), typeof(MeshRenderer));
+            go.transform.SetParent(parent, false);
+            go.GetComponent<MeshFilter>().sharedMesh = b.ToMesh();
+            go.GetComponent<MeshRenderer>().sharedMaterials = new[] { Palette.Get("Asphalt"), Palette.Get("LaneLine"), Palette.Get("Sidewalk"), Figures.Colour("#0B0D10", 0) };
         }
     }
 }

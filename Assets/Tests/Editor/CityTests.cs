@@ -271,9 +271,8 @@ namespace Horizonte.Tests
             int end = CityGenerator.EntranceEnd(city.Width);
             for (int x = 0; x <= end; x++) Assert.IsTrue(city.RoadConnected[city.Index(x, hy)], $"highway at {x}");
             Assert.IsFalse(city.IsRoad(end + 1, hy));
-            Assert.IsTrue(city.RoadConnected[city.Index(end - 3, hy + 5)], "the block");
             Assert.IsFalse(city.Building.Contains(Catalog.Bridge));
-            // A grove beside the first block for the first logging camp.
+            // Closed forest beyond the clearing at the end of the highway.
             int near = 0;
             for (int y = hy; y <= hy + 10; y++)
             for (int x = end + 1; x <= end + 9; x++)
@@ -288,8 +287,9 @@ namespace Horizonte.Tests
                 if (city.Terrain[city.Index(x, y)] == Terrain.Forest) forest++;
             }
             Assert.Greater(forest, tiles / 2);
-            // Inside the first block there is room to build.
-            Assert.AreEqual(Terrain.Grass, city.Terrain[city.Index(end - 3, hy + 2)]);
+            // A small clearing at the end of the highway for the first camp and homes.
+            Assert.AreEqual(Terrain.Grass, city.Terrain[city.Index(end, hy + 1)]);
+            Assert.AreEqual(Terrain.Forest, city.Terrain[city.Index(end + 6, hy + 3)]);
         }
 
         [Test]
@@ -367,6 +367,8 @@ namespace Horizonte.Tests
             var city = Woodland(out int station);
             Assert.AreEqual(FellResult.Ok, city.MarkTree(9, 15));
             Assert.AreEqual(FellResult.AlreadyMarked, city.MarkTree(9, 15));
+            Assert.AreEqual(1, city.Lumberjacks);
+            Assert.AreEqual(FellResult.Busy, city.MarkTree(10, 15), "one lumberjack, one tile at a time");
             Assert.AreEqual(FellResult.TooFar, city.MarkTree(8, 29));
             Assert.AreEqual(FellResult.NotATree, city.MarkTree(5, 5));
             int tree = city.TakeMarked(station);

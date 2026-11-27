@@ -6,7 +6,7 @@ namespace Horizonte.Simulation
     public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked, NoRoad, NeedsWater, Mountain, Reserve, NoWood, NeedsForest, Trees, NoFront }
 
     /// <summary>What happens when the player marks a tree to be felled.</summary>
-    public enum FellResult { Ok, NotATree, NoStation, TooFar, AlreadyMarked }
+    public enum FellResult { Ok, NotATree, NoStation, TooFar, AlreadyMarked, Busy }
 
     /// <summary>
     /// The whole city: a grid of 10 m tiles plus money, wood, time and statistics. One call to <see cref="Step"/> is five
@@ -427,19 +427,29 @@ namespace Horizonte.Simulation
 
         /// <summary>Trees the player marked for felling, in the order they were marked.</summary>
         public readonly List<int> Marked = new List<int>();
+        /// <summary>Tiles a lumberjack is felling right now (taken off <see cref="Marked"/>, not yet felled).</summary>
+        public readonly List<int> Felling = new List<int>();
+
+        /// <summary>Lumberjacks the city has: one at first, more as it grows.</summary>
+        public int Lumberjacks => Population >= 300 ? 5 : Population >= 150 ? 4 : Population >= 80 ? 3 : Population >= 30 ? 2 : 1;
+
+        /// <summary>Population that brings the next lumberjack, or 0 when there are already five.</summary>
+        public int NextLumberjackAt => Population < 30 ? 30 : Population < 80 ? 80 : Population < 150 ? 150 : Population < 300 ? 300 : 0;
 
         /// <summary>Marks a tree of the reserve for the lumberjack of a forest station in reach.</summary>
         public FellResult MarkTree(int x, int y)
         {
             if (!InBounds(x, y) || Terrain[Index(x, y)] != Simulation.Terrain.Forest) return FellResult.NotATree;
             int i = Index(x, y);
-            if (Marked.Contains(i)) return FellResult.AlreadyMarked;
+            if (Marked.Contains(i) || Felling.Contains(i)) return FellResult.AlreadyMarked;
             bool any = false;
             foreach (int s in Stations())
             {
                 any = true;
                 if (Distance(s, i) <= DefAt(s).LumberReach)
                 {
+                    // One tile per lumberjack at a time.
+                    if (Marked.Count + Felling.Count >= Lumberjacks) return FellResult.Busy;
                     Marked.Add(i);
                     return FellResult.Ok;
                 }
@@ -475,6 +485,7 @@ namespace Horizonte.Simulation
                 }
                 if (Distance(station, i) > def.LumberReach) continue;
                 Marked.RemoveAt(k);
+                Felling.Add(i);
                 return i;
             }
             return -1;
@@ -483,11 +494,15 @@ namespace Horizonte.Simulation
         /// <summary>Cuts down the trees of a tile, leaving stumps that grow back. False if there was no tree.</summary>
         public bool FellTree(int i)
         {
+            Felling.Remove(i);
             if (Terrain[i] != Simulation.Terrain.Forest) return false;
             Terrain[i] = Simulation.Terrain.Stumps;
             MarkChanged(i);
             return true;
         }
+
+        /// <summary>A lumberjack gave up on a tile (his station was demolished): it can be marked again.</summary>
+        public void StopFelling(int i) => Felling.Remove(i);
 
         /// <summary>Wood carried into a station by its lumberjack.</summary>
         public void DeliverWood(int amount) => Wood += amount;

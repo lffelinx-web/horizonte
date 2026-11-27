@@ -476,7 +476,7 @@ namespace Horizonte.Presentation
                         "Las casas y algunos edificios la usan para construirse; la que sobra se vende a " + $"<b>$ {Catalog.WoodPrice}</b> cada una.\n\n" +
                         (stations + sawmills == 0
                             ? "<color=#A9BCE0>Pon un <b>puesto de tala temporal</b> cerca de los árboles (Industria) y marca árboles con <b>Talar</b>. Fuera de la reserva los árboles no vuelven a crecer.</color>"
-                            : $"<color=#A9BCE0>{stations} {(stations == 1 ? "puesto de tala" : "puestos de tala")} y {sawmills} {(sawmills == 1 ? "aserradero" : "aserraderos")} trabajando. Árboles marcados: {c.Marked.Count}.</color>");
+                            : $"<color=#A9BCE0>{stations} {(stations == 1 ? "puesto de tala" : "puestos de tala")} y {sawmills} {(sawmills == 1 ? "aserradero" : "aserraderos")} trabajando. Leñadores: {c.Lumberjacks} · casillas en tala: {c.Marked.Count + c.Felling.Count}.</color>");
                     break;
                 case Popup.Alerts:
                     popupTitle.text = "Avisos";

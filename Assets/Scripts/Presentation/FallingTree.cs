@@ -32,6 +32,13 @@ namespace Horizonte.Presentation
             tree.axis = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
         }
 
+        /// <summary>Brings down a tree already standing in the world, falling toward a direction on the ground.</summary>
+        public static void Topple(GameObject tree, Vector3 toward)
+        {
+            var fall = tree.AddComponent<FallingTree>();
+            fall.axis = Vector3.Cross(Vector3.up, toward);
+        }
+
         void Update()
         {
             age += Time.deltaTime;
