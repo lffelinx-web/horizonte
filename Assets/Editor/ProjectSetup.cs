@@ -244,7 +244,7 @@ namespace Horizonte.EditorTools
             RenderSettings.ambientGroundColor = new Color(.29f, .27f, .23f);
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
-            RenderSettings.fogDensity = .0013f;
+            RenderSettings.fogDensity = .00105f;
             RenderSettings.fogColor = sky;
             RenderSettings.sun = sun;
 

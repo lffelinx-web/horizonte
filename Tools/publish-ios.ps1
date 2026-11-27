@@ -18,5 +18,11 @@ try {
   $tag = 'ios-' + (Get-Date -Format 'yyyyMMdd-HHmm')
   gh release create $tag $archive -R $Repo --title "iOS $tag" --notes 'Proyecto de Xcode generado por Unity para la compilación de iOS.' --prerelease
   if ($LASTEXITCODE -ne 0) { throw 'Could not create the release.' }
+  # Each release holds a 200-400 MB Xcode project: keep only the three newest.
+  $old = gh release list -R $Repo --limit 100 --json tagName,createdAt -q 'sort_by(.createdAt) | reverse | .[3:] | .[].tagName'
+  foreach ($t in $old) {
+    gh release delete $t -R $Repo --yes --cleanup-tag
+    Write-Output "Deleted old release $t"
+  }
 } finally { Remove-Item Env:GH_TOKEN }
 Write-Output "Published $tag"

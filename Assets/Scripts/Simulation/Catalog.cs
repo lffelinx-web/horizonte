@@ -2,7 +2,8 @@ using System.Collections.Generic;
 
 namespace Horizonte.Simulation
 {
-    public enum Terrain : byte { Grass, Water, Forest }
+    /// <summary>Ground of a tile. Stumps and saplings are felled forest growing back; mountains cannot be built on.</summary>
+    public enum Terrain : byte { Grass, Water, Forest, Mountain, Fertile, Stumps, Sapling }
 
     /// <summary>Groups on the building bar, in the order of the concept sheets.</summary>
     public enum Category : byte { Transport, Housing, Commerce, Industry, Energy, Water, Safety, Education, Health, Parks }
@@ -23,7 +24,7 @@ namespace Horizonte.Simulation
         public Category Category;
         public Kind Kind;
         public int Cost;
-        /// <summary>Monthly upkeep (per tile for roads).</summary>
+        /// <summary>Daily upkeep (per tile for roads).</summary>
         public int Upkeep;
         public int Width = 1, Height = 1;
         /// <summary>Residents the city needs before it can be built.</summary>
@@ -52,6 +53,14 @@ namespace Horizonte.Simulation
         public bool NeedsWater;
         /// <summary>Road that can be laid over water.</summary>
         public bool Bridge;
+        /// <summary>Wood used to build it, besides the money.</summary>
+        public int Wood;
+        /// <summary>Tiles of forest around it its loggers reach; zero for buildings that do not log.</summary>
+        public int LumberReach;
+        /// <summary>Fells trees by itself every hour (sawmill); otherwise the player marks each tree (forest station).</summary>
+        public bool AutoFell;
+        /// <summary>Must touch the forest reserve.</summary>
+        public bool NeedsForest;
         /// <summary>Floors, for the placeholder drawn until the model exists.</summary>
         public int Floors = 1;
         /// <summary>One line for the building menu.</summary>
@@ -64,6 +73,12 @@ namespace Horizonte.Simulation
     {
         public const ushort None = 0;
         public const int ClearForestCost = 5;
+        /// <summary>Money paid for each unit of wood sold.</summary>
+        public const int WoodPrice = 12;
+        /// <summary>Wood from one tile of forest, felled by hand or by a sawmill.</summary>
+        public const int WoodPerTree = 4, WoodPerSawmillTree = 6;
+        /// <summary>Upkeep in the catalog lines is per month of the old clock (20 seconds); a day now lasts as long as 24 of those.</summary>
+        const int UpkeepPerDay = 24;
         public const int BulldozeCost = 5;
 
         public static readonly ushort Road, Avenue, Bridge;
@@ -84,7 +99,7 @@ namespace Horizonte.Simulation
             var d = new BuildingDef
             {
                 Id = (ushort)defs.Count, Model = model, Name = name, Category = category, Kind = kind,
-                Cost = cost, Upkeep = upkeep, Width = w, Height = h, Floors = floors, MinPopulation = minPop,
+                Cost = cost, Upkeep = upkeep * UpkeepPerDay, Width = w, Height = h, Floors = floors, MinPopulation = minPop,
             };
             defs.Add(d);
             byModel[model] = d;
@@ -179,7 +194,16 @@ namespace Horizonte.Simulation
             // Industry and production.
             Work("granja_agricola", "Granja agrícola", Category.Industry, 1500, 4, 4, 1, 12, true);
             Work("procesadora_alimentos", "Planta de alimentos", Category.Industry, 5000, 3, 3, 2, 40, true, 100, -15, 4);
-            Work("aserradero", "Aserradero", Category.Industry, 3500, 3, 3, 2, 30, true, 50, -15, 4);
+            var station = Work("caseta_forestal", "Caseta forestal", Category.Industry, 400, 1, 1, 1, 3, true, 0, -2, 2);
+            station.LumberReach = 14;
+            station.PowerUse = 0;
+            station.NeedsForest = true;
+            station.Summary = "Un leñador tala los árboles que marques · sin luz";
+            var sawmill = Work("aserradero", "Aserradero", Category.Industry, 3500, 3, 3, 2, 30, true, 300, -15, 4);
+            sawmill.LumberReach = 12;
+            sawmill.AutoFell = true;
+            sawmill.NeedsForest = true;
+            sawmill.Summary = $"Su cuadrilla tala sola · {WoodPerSawmillTree} de madera por árbol";
             Work("fabrica_materiales", "Fábrica de materiales", Category.Industry, 7000, 4, 3, 2, 50, true, 300, -25, 5);
             Work("planta_metalurgica", "Planta metalúrgica", Category.Industry, 12000, 4, 4, 3, 90, true, 800, -40, 7);
             Work("fabrica_bienes", "Fábrica de bienes de consumo", Category.Industry, 10000, 4, 3, 2, 80, true, 600, -20, 5);
@@ -277,11 +301,33 @@ namespace Horizonte.Simulation
             smart.CityBonus = 6;
             smart.DesireRadius = 5;
             smart.Summary = "Satisfacción +6 en la ciudad";
+
+            // Wood: homes and small buildings are framed in timber.
+            void Timber(string model, int wood) => Get(model).Wood = wood;
+            Timber("casa_basica", 4);
+            Timber("casa_ampliada", 6);
+            Timber("duplex", 8);
+            Timber("apartamentos", 16);
+            Timber("conjunto_residencial", 40);
+            Timber("torre_residencial", 20);
+            Timber("tienda_abarrotes", 4);
+            Timber("restaurante", 8);
+            Timber("mercado_municipal", 12);
+            Timber("granja_agricola", 10);
+            Timber("guarderia", 6);
+            Timber("consultorio", 6);
+            Timber("escuela_primaria", 12);
+            Timber("puesto_policia", 4);
+            foreach (var d in defs)
+                if (d != null && d.Wood > 0) d.Summary += $" · {d.Wood} de madera";
         }
 
-        /// <summary>Days a building takes to go up: a few for a house, weeks for big projects. Streets are instant.</summary>
-        public static int BuildDays(BuildingDef def) =>
-            def.IsRoad ? 0 : System.Math.Max(3, System.Math.Min(60, (int)System.Math.Round(System.Math.Sqrt(def.Cost) / 6)));
+        /// <summary>
+        /// Ticks (five game minutes each) a building takes to go up: about three hours for a house, five for apartments,
+        /// eight for a tower and up to half a day for the biggest projects. Streets are instant.
+        /// </summary>
+        public static int BuildTicks(BuildingDef def) =>
+            def.IsRoad ? 0 : (int)System.Math.Round(System.Math.Min(13, .72 * System.Math.Pow(def.Cost, .25)) * City.TicksPerHour);
 
         // ---------------------------------------------------------------- services
 

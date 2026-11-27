@@ -242,6 +242,14 @@ namespace Horizonte.Presentation
             {
                 if (!city.InBounds(x, y)) continue;
                 float x0 = x * CityView.TileSize + inset, z0 = y * CityView.TileSize + inset;
+                if (Tool.IsFell)
+                {
+                    int f = city.Index(x, y);
+                    if (!city.InReserve(x, y) || city.Terrain[f] != Simulation.Terrain.Forest || city.Marked.Contains(f)) continue;
+                    preview.Flat(2, x0, z0, x0 + CityView.TileSize - 2 * inset, z0 + CityView.TileSize - 2 * inset, 7.5f);
+                    count++;
+                    continue;
+                }
                 if (Tool.IsBulldoze)
                 {
                     int i = city.Index(x, y);
@@ -262,7 +270,8 @@ namespace Horizonte.Presentation
                 preview.Flat(ok ? 0 : 1, x0, z0, x0 + w, z0 + d, lift);
             }
             previewFilter.sharedMesh = preview.ToMesh(previewFilter.sharedMesh);
-            hud.ShowCost(count == 0 ? null : $"{Tools.Label(Tool)} · {count} {(count == 1 ? "casilla" : "casillas")} · ${total:N0}");
+            if (Tool.IsFell) hud.ShowCost(count == 0 ? null : $"Talar · {count} {(count == 1 ? "árbol" : "árboles")} · {count * Catalog.WoodPerTree} de madera");
+            else hud.ShowCost(count == 0 ? null : $"{Tools.Label(Tool)} · {count} {(count == 1 ? "casilla" : "casillas")} · ${total:N0}");
         }
 
         void ClearPreview()
@@ -276,6 +285,24 @@ namespace Horizonte.Presentation
         {
             var city = game.City;
             BuildShape();
+            if (Tool.IsFell)
+            {
+                int marked = 0;
+                var why = FellResult.NotATree;
+                foreach (var (x, y) in shape)
+                {
+                    var r = city.MarkTree(x, y);
+                    if (r == FellResult.Ok) marked++;
+                    else if (r != FellResult.NotATree && r != FellResult.AlreadyMarked) why = r;
+                    else if (why == FellResult.NotATree && r == FellResult.AlreadyMarked) why = r;
+                }
+                if (marked > 0) hud.Toast($"{marked} {(marked == 1 ? "árbol marcado" : "árboles marcados")} para talar");
+                else hud.Toast(why == FellResult.NoStation ? "Primero construye una caseta forestal junto a la reserva"
+                    : why == FellResult.TooFar ? "Ese árbol queda lejos de la caseta forestal"
+                    : why == FellResult.AlreadyMarked ? "Ese árbol ya está marcado"
+                    : "Toca los árboles de la reserva forestal");
+                return;
+            }
             if (Tool.IsBulldoze)
             {
                 int removed = 0;
@@ -284,7 +311,7 @@ namespace Horizonte.Presentation
                 return;
             }
             int placed = city.PlaceMany(Tool.Building, shape, out var problem, turned);
-            if (problem != PlaceResult.Ok && (placed == 0 || problem == PlaceResult.NoMoney)) hud.Toast(Message(problem));
+            if (problem != PlaceResult.Ok && (placed == 0 || problem == PlaceResult.NoMoney || problem == PlaceResult.NoWood)) hud.Toast(Message(problem));
         }
 
         string Message(PlaceResult r)
@@ -297,6 +324,10 @@ namespace Horizonte.Presentation
                 case PlaceResult.Locked: return $"Se desbloquea con {Hud.N(Tool.Def.MinPopulation)} habitantes";
                 case PlaceResult.NoRoad: return "Debe quedar junto a una calle";
                 case PlaceResult.NeedsWater: return "Debe quedar junto al río";
+                case PlaceResult.Mountain: return "No se puede construir en la montaña";
+                case PlaceResult.Reserve: return "La reserva forestal no se construye; usa Talar para sacar madera";
+                case PlaceResult.NeedsForest: return "Debe quedar junto a la reserva forestal";
+                case PlaceResult.NoWood: return $"Faltan {Tool.Def.Wood - game.City.Wood} de madera: tala árboles o espera a tu leñador";
                 default: return "Ese lugar ya está ocupado";
             }
         }

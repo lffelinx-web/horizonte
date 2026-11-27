@@ -50,11 +50,13 @@ namespace Horizonte.EditorTools
             public byte Metallic, Smoothness;
             /// <summary>Lamps and lit interiors give off their own light.</summary>
             public bool Glows;
+            /// <summary>Glass, lit from inside at night.</summary>
+            public bool Window;
             /// <summary>Main wall, repainted per building with one of the facade colours.</summary>
             public bool Facade;
 
-            public bool Equals(Swatch o) => Color.r == o.Color.r && Color.g == o.Color.g && Color.b == o.Color.b && Metallic == o.Metallic && Smoothness == o.Smoothness && Glows == o.Glows && Facade == o.Facade;
-            public override int GetHashCode() => (Color.r << 24) ^ (Color.g << 16) ^ (Color.b << 8) ^ (Metallic << 4) ^ Smoothness ^ (Glows ? 1 << 30 : 0) ^ (Facade ? 1 << 29 : 0);
+            public bool Equals(Swatch o) => Color.r == o.Color.r && Color.g == o.Color.g && Color.b == o.Color.b && Metallic == o.Metallic && Smoothness == o.Smoothness && Glows == o.Glows && Facade == o.Facade && Window == o.Window;
+            public override int GetHashCode() => (Color.r << 24) ^ (Color.g << 16) ^ (Color.b << 8) ^ (Metallic << 4) ^ Smoothness ^ (Glows ? 1 << 30 : 0) ^ (Facade ? 1 << 29 : 0) ^ (Window ? 1 << 28 : 0);
         }
 
         [MenuItem("Horizonte/Preparar edificios")]
@@ -238,6 +240,7 @@ namespace Horizonte.EditorTools
                 Metallic = (byte)Mathf.RoundToInt(metallic * 255),
                 Smoothness = (byte)Mathf.RoundToInt(smoothness * 255),
                 Glows = !glass && IsLight(m, n),
+                Window = glass,
                 Facade = !glass && !metal && !foliage && IsFacade(srgb, n),
             };
         }
@@ -299,7 +302,8 @@ namespace Horizonte.EditorTools
                 var s = i < palette.Count ? palette[i] : new Swatch { Color = new Color32(128, 128, 128, 255), Smoothness = 50 };
                 colors[i] = new Color32(s.Color.r, s.Color.g, s.Color.b, 255);
                 gloss[i] = new Color32(s.Metallic, s.Metallic, s.Metallic, s.Smoothness);
-                glow[i] = s.Glows ? new Color32(s.Color.r, s.Color.g, s.Color.b, 255) : new Color32(0, 0, 0, 255);
+                // Lamps glow in their own colour; windows a warm interior light. The game turns both up at night.
+                glow[i] = s.Glows ? new Color32(s.Color.r, s.Color.g, s.Color.b, 255) : s.Window ? new Color32(150, 112, 62, 255) : new Color32(0, 0, 0, 255);
             }
             SavePng(PalettePath, colors, true);
             for (int k = 0; k < FacadeColours.Length; k++)

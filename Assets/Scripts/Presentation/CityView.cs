@@ -17,7 +17,11 @@ namespace Horizonte.Presentation
 
         // Ground slots, in material order.
         const int SGrass = 0, SForest = 1, SBank = 2, SAsphalt = 3, SSidewalk = 4, SLine = 5, SZoneR = 6, SZoneC = 7, SZoneI = 8, SYard = 9, STrunk = 10, SLeaves = 11, SLamp = 12, SGlow = 13;
-        static readonly string[] GroundMaterials = { "Grass", "ForestFloor", "Bank", "Asphalt", "Sidewalk", "LaneLine", "ZoneResidential", "ZoneCommercial", "ZoneIndustrial", "Yard", "Trunk", "Leaves", "StreetLamp", "LampGlow" };
+        const int SLeavesLight = 14, SField = 15, SFieldRow = 16, SCut = 17;
+        static readonly string[] GroundMaterials = { "Grass", "ForestFloor", "Bank", "Asphalt", "Sidewalk", "LaneLine", "ZoneResidential", "ZoneCommercial", "ZoneIndustrial", "Yard", "Trunk", "Leaves", "StreetLamp", "LampGlow", "LeavesLight", "Field", "FieldRow", "StumpCut" };
+
+        /// <summary>Terrain last drawn on each tile, to notice trees being felled.</summary>
+        Simulation.Terrain[] drawnTerrain;
 
         City city;
         int chunksX, chunksY;
@@ -144,6 +148,9 @@ namespace Horizonte.Presentation
                 dirtyChunks.Add(i);
             }
             BuildSurroundings();
+            Relief.Build(transform, city);
+            BuildFence();
+            drawnTerrain = (Simulation.Terrain[])city.Terrain.Clone();
             for (int i = 0; i < city.Building.Length; i++) RefreshBuilding(i);
             RebuildDirty();
         }
@@ -179,7 +186,7 @@ namespace Horizonte.Presentation
             foreach (var kv in sites)
             {
                 var def = city.DefAt(kv.Key);
-                int total = def == null ? 1 : Mathf.Max(1, Catalog.BuildDays(def));
+                int total = def == null ? 1 : Mathf.Max(1, Catalog.BuildTicks(def));
                 float left = Mathf.Max(0, city.Construction[kv.Key] - dayFraction);
                 kv.Value.SetProgress(1 - left / total);
             }
@@ -188,6 +195,8 @@ namespace Horizonte.Presentation
             foreach (int i in changes)
             {
                 int x = i % city.Width, y = i / city.Width;
+                if (drawnTerrain[i] == Simulation.Terrain.Forest && city.Terrain[i] == Simulation.Terrain.Stumps) FallingTree.Spawn(transform, TileCentre(x, y), Hash(x, y));
+                drawnTerrain[i] = city.Terrain[i];
                 // Neighbours matter for road shapes and river banks, which can cross a chunk border.
                 MarkChunk(x, y);
                 MarkChunk(x - 1, y);
@@ -244,8 +253,19 @@ namespace Horizonte.Presentation
 
             if (def == null)
             {
-                builder.Flat(terrain == Simulation.Terrain.Forest ? SForest : SGrass, x0, z0, x1, z1, 0);
-                if (terrain == Simulation.Terrain.Forest) BuildTrees(x, y);
+                switch (terrain)
+                {
+                    // The relief mesh covers mountain tiles.
+                    case Simulation.Terrain.Mountain: return;
+                    case Simulation.Terrain.Fertile: BuildField(x, y, x0, z0); break;
+                    case Simulation.Terrain.Forest:
+                    case Simulation.Terrain.Stumps:
+                    case Simulation.Terrain.Sapling:
+                        builder.Flat(SForest, x0, z0, x1, z1, 0);
+                        BuildTrees(x, y, terrain);
+                        break;
+                    default: builder.Flat(SGrass, x0, z0, x1, z1, 0); break;
+                }
             }
             else if (def.IsRoad) BuildRoad(x, y, x0, z0, def.Id == Catalog.Avenue);
             else
@@ -344,12 +364,12 @@ namespace Horizonte.Presentation
             if (northSouth)
             {
                 if (lamp) Lamp(new Vector3(x0 + side, h, z0 + mid), Vector3.right);
-                else Tree(builder, SLeaves, STrunk, new Vector3(x0 + TileSize - side, h, z0 + mid), .5f);
+                else Trees.Broadleaf(builder, SLeavesLight, STrunk, new Vector3(x0 + TileSize - side, h, z0 + mid), .42f, Hash(x, y));
             }
             else
             {
                 if (lamp) Lamp(new Vector3(x0 + mid, h, z0 + side), Vector3.forward);
-                else Tree(builder, SLeaves, STrunk, new Vector3(x0 + mid, h, z0 + TileSize - side), .5f);
+                else Trees.Broadleaf(builder, SLeavesLight, STrunk, new Vector3(x0 + mid, h, z0 + TileSize - side), .42f, Hash(x, y));
             }
         }
 
@@ -368,7 +388,11 @@ namespace Horizonte.Presentation
             builder.Box(SSidewalk, new Vector3((x0 + x1) * .5f, 0, (z0 + z1) * .5f), new Vector3(x1 - x0, h, z1 - z0));
         }
 
-        void BuildTrees(int x, int y)
+        /// <summary>
+        /// Woods: mostly pines with some broadleaf trees, of different sizes. Felled tiles show stumps, and young trees
+        /// when the forest grows back.
+        /// </summary>
+        void BuildTrees(int x, int y, Simulation.Terrain terrain)
         {
             uint h = Hash(x, y);
             int count = 2 + (int)(h % 3);
@@ -378,15 +402,82 @@ namespace Horizonte.Presentation
                 float px = (x + .15f + (h & 0xFF) / 255f * .7f) * TileSize;
                 float pz = (y + .15f + ((h >> 8) & 0xFF) / 255f * .7f) * TileSize;
                 float size = .8f + ((h >> 16) & 0xFF) / 255f * .5f;
-                Tree(builder, SLeaves, STrunk, new Vector3(px, 0, pz), size);
+                var at = new Vector3(px, 0, pz);
+                switch (terrain)
+                {
+                    case Simulation.Terrain.Stumps: Trees.Stump(builder, STrunk, SCut, at, size); break;
+                    case Simulation.Terrain.Sapling: Trees.Sapling(builder, SLeavesLight, STrunk, at, size); break;
+                    default:
+                        if ((h >> 24) % 10 < 3) Trees.Broadleaf(builder, SLeavesLight, STrunk, at, size * .9f, h);
+                        else Trees.Conifer(builder, SLeaves, STrunk, at, size);
+                        break;
+                }
             }
         }
 
-        public static void Tree(MeshBuilder b, int leaves, int trunk, Vector3 at, float size)
+        public static void Tree(MeshBuilder b, int leaves, int trunk, Vector3 at, float size) => Trees.Conifer(b, leaves, trunk, at, size);
+
+        /// <summary>A ploughed field: crop rows along the tile, slightly different on every tile.</summary>
+        void BuildField(int x, int y, float x0, float z0)
         {
-            b.Cylinder(trunk, at, .22f * size, 1.6f * size, 5);
-            b.Cone(leaves, at + Vector3.up * 1.2f * size, 1.9f * size, 3.6f * size, 7);
-            b.Cone(leaves, at + Vector3.up * 3f * size, 1.4f * size, 2.8f * size, 7);
+            builder.Flat(SField, x0, z0, x0 + TileSize, z0 + TileSize, 0);
+            const int rows = 6;
+            const float gap = TileSize / rows;
+            bool across = ((x / 3 + y / 4) & 1) == 0;
+            for (int r = 0; r < rows; r++)
+            {
+                float a = r * gap + gap * .3f, b = a + gap * .4f;
+                if (across) builder.Flat(SFieldRow, x0 + a, z0, x0 + b, z0 + TileSize, .02f);
+                else builder.Flat(SFieldRow, x0, z0 + a, x0 + TileSize, z0 + b, .02f);
+            }
+        }
+
+        /// <summary>Wooden fence around the forest reserve, with a gate where the road from the highway arrives.</summary>
+        void BuildFence()
+        {
+            if (city.ReserveX1 < city.ReserveX0) return;
+            var b = new MeshBuilder(2);
+            float x0 = city.ReserveX0 * TileSize, x1 = (city.ReserveX1 + 1) * TileSize;
+            float z0 = city.ReserveY0 * TileSize, z1 = (city.ReserveY1 + 1) * TileSize;
+            float gate0 = city.GateX * TileSize + 2.2f, gate1 = (city.GateX + 1) * TileSize - 2.2f;
+            bool Land(Vector3 p)
+            {
+                int tx = Mathf.Clamp(Mathf.FloorToInt(p.x / TileSize), 0, city.Width - 1), tz = Mathf.Clamp(Mathf.FloorToInt(p.z / TileSize), 0, city.Height - 1);
+                return city.Terrain[city.Index(tx, tz)] != Simulation.Terrain.Water;
+            }
+            void Side(Vector3 from, Vector3 to, bool withGate)
+            {
+                const float spacing = 2.5f;
+                int n = Mathf.Max(1, Mathf.RoundToInt(Vector3.Distance(from, to) / spacing));
+                var dir = (to - from) / n;
+                for (int k = 0; k <= n; k++)
+                {
+                    var p = from + dir * k;
+                    bool inGate = withGate && p.x > gate0 && p.x < gate1;
+                    if (!inGate && Land(p)) b.Box(0, p, new Vector3(.16f, 1.25f, .16f));
+                    if (k == n) continue;
+                    var q = p + dir;
+                    bool railGate = withGate && q.x > gate0 && p.x < gate1;
+                    if (railGate || !Land(p) || !Land(q)) continue;
+                    var mid = (p + q) * .5f;
+                    var size = new Vector3(Mathf.Abs(dir.x) + .06f, .09f, Mathf.Abs(dir.z) + .06f);
+                    b.Box(0, mid + Vector3.up * .45f, size);
+                    b.Box(0, mid + Vector3.up * .95f, size);
+                }
+            }
+            Side(new Vector3(x0, 0, z0), new Vector3(x1, 0, z0), true);
+            Side(new Vector3(x0, 0, z1), new Vector3(x1, 0, z1), false);
+            Side(new Vector3(x0, 0, z0), new Vector3(x0, 0, z1), false);
+            Side(new Vector3(x1, 0, z0), new Vector3(x1, 0, z1), false);
+            // Gate: two tall posts and a beam with a sign.
+            b.Box(0, new Vector3(gate0, 0, z0), new Vector3(.35f, 4.2f, .35f));
+            b.Box(0, new Vector3(gate1, 0, z0), new Vector3(.35f, 4.2f, .35f));
+            b.Box(0, new Vector3((gate0 + gate1) * .5f, 3.8f, z0), new Vector3(gate1 - gate0 + .6f, .3f, .3f));
+            b.Box(1, new Vector3((gate0 + gate1) * .5f, 2.85f, z0 - .1f), new Vector3(3.4f, .85f, .12f));
+            var go = new GameObject("Cerca de la reserva", typeof(MeshFilter), typeof(MeshRenderer));
+            go.transform.SetParent(transform, false);
+            go.GetComponent<MeshFilter>().sharedMesh = b.ToMesh();
+            go.GetComponent<MeshRenderer>().sharedMaterials = Palette.Get("Trunk", "StumpCut");
         }
 
         public static uint Hash(int x, int y)

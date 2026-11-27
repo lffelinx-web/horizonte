@@ -6,18 +6,21 @@ namespace Horizonte.Simulation
     [Serializable]
     public sealed class CitySave
     {
-        /// <summary>Version 2: buildings placed by hand from the catalog (version 1 had zones).</summary>
-        public const int CurrentVersion = 2;
+        /// <summary>Version 3: five-minute ticks, wood and the forest reserve (2 had days; 1 had zones).</summary>
+        public const int CurrentVersion = 3;
 
         public int version = CurrentVersion;
         public int width, height;
         public long money;
-        public int day, taxRate;
+        public int tick, taxRate, wood;
+        public uint mapSeed;
+        /// <summary>Forest reserve bounds and the column of its gate.</summary>
+        public int reserveX0, reserveY0, reserveX1, reserveY1, gateX;
         public uint rng;
         public string name;
         /// <summary>Terrain and rotation are one byte per tile; buildings are catalog models by name; occupants four bytes.</summary>
         public string terrain, building, rotation, occupants;
-        /// <summary>Days left on buildings under construction (one byte per tile); missing in older saves.</summary>
+        /// <summary>Ticks left on buildings under construction (one byte per tile); missing in older saves.</summary>
         public string construction;
         public string[] models;
         public long loanBalance;
@@ -51,7 +54,14 @@ namespace Horizonte.Simulation
                 width = city.Width,
                 height = city.Height,
                 money = city.Money,
-                day = city.Day,
+                tick = city.Tick,
+                wood = city.Wood,
+                mapSeed = city.MapSeed,
+                reserveX0 = city.ReserveX0,
+                reserveY0 = city.ReserveY0,
+                reserveX1 = city.ReserveX1,
+                reserveY1 = city.ReserveY1,
+                gateX = city.GateX,
                 taxRate = city.TaxRate,
                 rng = city.RngState,
                 name = city.Name,
@@ -69,7 +79,8 @@ namespace Horizonte.Simulation
         public City ToCity()
         {
             if (version != CurrentVersion) throw new InvalidOperationException($"Save version {version} is from an older game.");
-            var city = new City(width, height, rng) { Money = money, Day = day, TaxRate = taxRate, LoanBalance = loanBalance, LoanPayment = loanPayment };
+            var city = new City(width, height, rng) { Money = money, Tick = tick, Wood = wood, MapSeed = mapSeed, GateX = gateX, TaxRate = taxRate, LoanBalance = loanBalance, LoanPayment = loanPayment };
+            city.SetReserve(reserveX0, reserveY0, reserveX1, reserveY1);
             if (!string.IsNullOrEmpty(name)) city.Name = name;
             int n = width * height;
             var t = Convert.FromBase64String(terrain);

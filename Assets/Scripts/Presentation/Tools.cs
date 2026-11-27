@@ -4,10 +4,10 @@ using UnityEngine;
 
 namespace Horizonte.Presentation
 {
-    /// <summary>What a finger does on the map: look around, demolish, or build one building of the catalog.</summary>
+    /// <summary>What a finger does on the map: look around, demolish, mark trees to fell, or build one building of the catalog.</summary>
     public readonly struct Tool : IEquatable<Tool>
     {
-        enum Mode : byte { Explore, Bulldoze, Build }
+        enum Mode : byte { Explore, Bulldoze, Build, Fell }
 
         readonly Mode mode;
         public readonly ushort Building;
@@ -20,12 +20,14 @@ namespace Horizonte.Presentation
 
         public static readonly Tool Explore = new Tool(Mode.Explore, 0);
         public static readonly Tool Bulldoze = new Tool(Mode.Bulldoze, 0);
+        public static readonly Tool Fell = new Tool(Mode.Fell, 0);
         public static Tool Build(ushort id) => new Tool(Mode.Build, id);
         public static Tool Build(string model) => Build(Catalog.Get(model).Id);
 
         public bool IsBuild => mode == Mode.Build;
         public bool IsBulldoze => mode == Mode.Bulldoze;
         public bool IsExplore => mode == Mode.Explore;
+        public bool IsFell => mode == Mode.Fell;
         public BuildingDef Def => IsBuild ? Catalog.Get(Building) : null;
 
         public bool Equals(Tool o) => mode == o.mode && Building == o.Building;
@@ -58,6 +60,7 @@ namespace Horizonte.Presentation
             new BarItem { Name = "Educación", Icon = "school", Category = Simulation.Category.Education },
             new BarItem { Name = "Salud", Icon = "cross", Category = Simulation.Category.Health },
             new BarItem { Name = "Parques", Icon = "tree", Category = Simulation.Category.Parks },
+            new BarItem { Name = "Talar", Icon = "axe", Tool = Presentation.Tool.Fell },
             new BarItem { Name = "Demoler", Icon = "bulldoze", Tool = Presentation.Tool.Bulldoze },
         };
 
@@ -101,20 +104,21 @@ namespace Horizonte.Presentation
             }
         }
 
-        public static string Label(Tool t) => t.IsExplore ? "Explorar" : t.IsBulldoze ? "Demoler" : t.Def.Name;
+        public static string Label(Tool t) => t.IsExplore ? "Explorar" : t.IsBulldoze ? "Demoler" : t.IsFell ? "Talar" : t.Def.Name;
 
         public static string CostLabel(Tool t)
         {
             if (t.IsExplore) return "";
+            if (t.IsFell) return $"{Catalog.WoodPerTree} de madera por árbol";
             if (t.IsBulldoze) return $"$ {Catalog.BulldozeCost} por casilla";
             var def = t.Def;
-            return def.IsRoad ? $"$ {Hud.N(def.Cost)} por casilla" : $"$ {Hud.N(def.Cost)}";
+            return def.IsRoad ? $"$ {Hud.N(def.Cost)} por casilla" : def.Wood > 0 ? $"$ {Hud.N(def.Cost)} + {def.Wood} madera" : $"$ {Hud.N(def.Cost)}";
         }
 
         public static Color Swatch(Tool t) =>
-            t.IsBulldoze ? new Color(.92f, .35f, .3f) : t.IsExplore ? new Color(.85f, .85f, .85f) : CategoryColor(t.Def.Category);
+            t.IsBulldoze ? new Color(.92f, .35f, .3f) : t.IsFell ? new Color(.86f, .66f, .42f) : t.IsExplore ? new Color(.85f, .85f, .85f) : CategoryColor(t.Def.Category);
 
-        public static string Icon(Tool t) => t.IsBulldoze ? "bulldoze" : t.IsExplore ? "explore" : Icon(t.Def);
+        public static string Icon(Tool t) => t.IsBulldoze ? "bulldoze" : t.IsFell ? "axe" : t.IsExplore ? "explore" : Icon(t.Def);
 
         public static string Icon(BuildingDef def)
         {
@@ -129,7 +133,10 @@ namespace Horizonte.Presentation
             switch (ShapeOf(t))
             {
                 case Shape.Line: return $"{Label(t)}  ·  {CostLabel(t)}  ·  arrastra para trazar";
-                case Shape.Rect: return $"Demoler  ·  {CostLabel(t)}  ·  arrastra sobre lo que quieras quitar";
+                case Shape.Rect:
+                    return t.IsFell
+                        ? "Talar  ·  toca árboles de la reserva o arrastra para marcar varios  ·  el leñador de la caseta los corta"
+                        : $"Demoler  ·  {CostLabel(t)}  ·  arrastra sobre lo que quieras quitar";
                 case Shape.Single:
                     var def = t.Def;
                     string where = def.NeedsWater ? "junto al río y a una calle" : "junto a una calle";
@@ -144,7 +151,7 @@ namespace Horizonte.Presentation
         public static Shape ShapeOf(Tool t)
         {
             if (t.IsExplore) return Shape.None;
-            if (t.IsBulldoze) return Shape.Rect;
+            if (t.IsBulldoze || t.IsFell) return Shape.Rect;
             return t.Def.IsRoad ? Shape.Line : Shape.Single;
         }
     }

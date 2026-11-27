@@ -11,6 +11,8 @@ namespace Horizonte.Presentation
         public Vector3 Focus;
         public float Yaw = 30;
         public float Distance = 170;
+        /// <summary>Height of the sun above the horizon, and how far it has swung from its usual place beside the view (set by DayNight).</summary>
+        public float SunPitch = 34, SunTurn;
         Vector2 limits;
 
         public void Init(Camera cam, Vector2 mapSize)
@@ -50,7 +52,7 @@ namespace Horizonte.Presentation
                 urp.shadowDistance = Mathf.Clamp(Distance * 1.9f, 120, 700);
             // The sun turns with the view and shines from behind on the left, so the sides we see are lit
             // and shadows fall beside buildings instead of hiding behind them.
-            if (RenderSettings.sun != null) RenderSettings.sun.transform.rotation = Quaternion.Euler(34, Yaw + 65, 0);
+            if (RenderSettings.sun != null) RenderSettings.sun.transform.rotation = Quaternion.Euler(SunPitch, Yaw + 65 + SunTurn, 0);
         }
 
         /// <summary>Point on the ground (y = 0) under a screen position.</summary>

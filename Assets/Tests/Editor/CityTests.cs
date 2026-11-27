@@ -16,9 +16,9 @@ namespace Horizonte.Tests
             return city;
         }
 
-        static void Days(City city, int days)
+        static void Ticks(City city, int ticks)
         {
-            for (int d = 0; d < days; d++) city.Step();
+            for (int d = 0; d < ticks; d++) city.Step();
         }
 
         [Test]
@@ -69,7 +69,7 @@ namespace Horizonte.Tests
             city.Place(Id("granja_agricola"), 6, 6);
             city.FinishConstruction();
             Assert.IsTrue(city.Working(city.Index(4, 11)));
-            Days(city, 120);
+            city.StepDays(1);
             Assert.Greater(city.Population, 10);
             Assert.Greater(city.Satisfaction, 0);
         }
@@ -79,7 +79,7 @@ namespace Horizonte.Tests
         {
             var city = Flat();
             for (int x = 4; x < 8; x++) city.Place(Id("casa_basica"), x, 11);
-            Days(city, 60);
+            city.StepDays(1);
             Assert.AreEqual(0, city.Population);
             Assert.IsFalse(city.Powered[city.Index(4, 11)]);
         }
@@ -118,7 +118,7 @@ namespace Horizonte.Tests
             int shop = city.Index(4, 11);
             Assert.Greater(city.Construction[shop], 0);
             Assert.IsFalse(city.Working(shop));
-            Days(city, Catalog.BuildDays(Catalog.Get("central_termoelectrica")));
+            Ticks(city, Catalog.BuildTicks(Catalog.Get("central_termoelectrica")));
             Assert.AreEqual(0, city.Construction[shop]);
             Assert.IsTrue(city.Working(shop));
             Assert.AreEqual(6, city.Jobs);
@@ -143,7 +143,7 @@ namespace Horizonte.Tests
         }
 
         [Test]
-        public void LoansArePaidBackMonthly()
+        public void LoansArePaidBackDaily()
         {
             var city = Flat();
             long before = city.Money;
@@ -151,9 +151,9 @@ namespace Horizonte.Tests
             Assert.IsFalse(city.TakeLoan());
             Assert.AreEqual(before + City.LoanAmount * City.MaxLoans, city.Money);
             Assert.AreEqual(55000, city.LoanBalance);
-            Days(city, City.DaysPerMonth);
-            Assert.AreEqual(2292, city.LastLoanPayment);
-            Assert.AreEqual(55000 - 2292, city.LoanBalance);
+            city.StepDays(1);
+            Assert.AreEqual(5500, city.LastLoanPayment);
+            Assert.AreEqual(55000 - 5500, city.LoanBalance);
         }
 
         [Test]
@@ -165,8 +165,8 @@ namespace Horizonte.Tests
             city.Place(Id("tienda_abarrotes"), 2, 11);
             city.FinishConstruction();
             Assert.IsTrue(city.Working(city.Index(2, 11)));
-            Days(city, City.DaysPerMonth);
-            Assert.AreEqual((int)System.Math.Round(6 * 9 / 5.0), city.LastBusinessTax);
+            city.StepDays(1);
+            Assert.AreEqual((int)System.Math.Round(6 * 9 * 4.8), city.LastBusinessTax);
         }
 
         [Test]
@@ -209,14 +209,20 @@ namespace Horizonte.Tests
             city.Place(Id("central_termoelectrica"), 0, 11);
             city.Place(Id("apartamentos"), 4, 11);
             city.Place(Id("tienda_abarrotes"), 4, 8);
-            Days(city, 60);
+            city.SetReserve(20, 20, 28, 28);
+            city.GateX = 24;
+            city.Wood = 77;
+            city.StepDays(1);
             var copy = CitySave.From(city).ToCity();
             CollectionAssert.AreEqual(city.Building, copy.Building);
             CollectionAssert.AreEqual(city.Terrain, copy.Terrain);
             CollectionAssert.AreEqual(city.Anchor, copy.Anchor);
             CollectionAssert.AreEqual(city.Occupants, copy.Occupants);
             Assert.AreEqual(city.Money, copy.Money);
-            Assert.AreEqual(city.Day, copy.Day);
+            Assert.AreEqual(city.Tick, copy.Tick);
+            Assert.AreEqual(77, copy.Wood);
+            Assert.IsTrue(copy.InReserve(24, 24));
+            Assert.AreEqual(24, copy.GateX);
             Assert.AreEqual(city.Population, copy.Population);
             Assert.AreEqual(city.Name, copy.Name);
         }
@@ -254,12 +260,134 @@ namespace Horizonte.Tests
         }
 
         [Test]
-        public void GeneratedMapHasRiverForestAndHighway()
+        public void GeneratedMapFollowsTheTerritorySketch()
         {
             var city = CityGenerator.Create();
             Assert.IsTrue(city.Terrain.Contains(Terrain.Water));
-            Assert.IsTrue(city.Terrain.Contains(Terrain.Forest));
-            Assert.IsTrue(city.RoadConnected[city.Index(city.Width / 2 - 1, city.Height / 2)]);
+            Assert.IsTrue(city.Terrain.Contains(Terrain.Mountain), "mountains");
+            Assert.IsTrue(city.Terrain.Contains(Terrain.Fertile), "fields");
+            int hy = Landscape.HighwayY(city.Height);
+            // The highway crosses the whole map, over the river on a bridge.
+            for (int x = 0; x < city.Width; x++) Assert.IsTrue(city.RoadConnected[city.Index(x, hy)], $"highway at {x}");
+            Assert.IsTrue(city.Building.Contains(Catalog.Bridge));
+            // The reserve is mostly forest, and its gate road joins the highway.
+            int forest = 0, tiles = 0;
+            for (int y = city.ReserveY0; y <= city.ReserveY1; y++)
+            for (int x = city.ReserveX0; x <= city.ReserveX1; x++)
+            {
+                tiles++;
+                if (city.Terrain[city.Index(x, y)] == Terrain.Forest) forest++;
+            }
+            Assert.Greater(forest, tiles / 2);
+            Assert.IsTrue(city.RoadConnected[city.Index(city.GateX, city.ReserveY0 - 1)]);
+            // The plain where the town starts is clear.
+            Assert.AreEqual(Terrain.Grass, city.Terrain[city.Index(city.Width / 2 - 10, hy + 5)]);
+        }
+
+        [Test]
+        public void MountainsAndTheReserveCannotBeBuiltOn()
+        {
+            var city = CityGenerator.Create();
+            city.IgnoreRequirements = true;
+            int mountain = System.Array.IndexOf(city.Terrain, Terrain.Mountain);
+            Assert.AreEqual(PlaceResult.Mountain, city.CanPlace(Id("casa_basica"), mountain % city.Width, mountain / city.Width));
+            Assert.AreEqual(PlaceResult.Reserve, city.CanPlace(Id("casa_basica"), city.GateX + 1, city.ReserveY0));
+            Assert.IsFalse(city.Bulldoze(city.GateX, city.ReserveY0 + 2), "reserve trees are felled, not bulldozed");
+        }
+
+        [Test]
+        public void ADayHasEightMinutesOfTicksAndTaxesComeAtSix()
+        {
+            var city = Flat();
+            Assert.AreEqual(7f, city.Hour);
+            Assert.AreEqual(0, city.Day);
+            Assert.IsFalse(city.HasBudget);
+            city.Place(Id("central_termoelectrica"), 0, 11);
+            city.Place(Id("tienda_abarrotes"), 4, 11);
+            int ticks = 0;
+            while (!city.HasBudget && ticks < City.TicksPerDay * 2) { city.Step(); ticks++; }
+            Assert.AreEqual(City.TicksPerDay - City.TicksPerHour, ticks, "from seven to six the next morning");
+            Assert.AreEqual(1, city.Day);
+            Assert.AreEqual(6f, city.Hour);
+        }
+
+        [Test]
+        public void BuildingsTakeHoursToGoUp()
+        {
+            int Hours(string model) => Catalog.BuildTicks(Catalog.Get(model)) / City.TicksPerHour;
+            Assert.AreEqual(3, Hours("casa_basica"));
+            Assert.That(Hours("apartamentos"), Is.InRange(5, 6));
+            Assert.That(Hours("torre_residencial"), Is.InRange(8, 9));
+            Assert.LessOrEqual(Hours("aeropuerto"), 13);
+            Assert.AreEqual(0, Catalog.BuildTicks(Catalog.Get("calle")));
+        }
+
+        [Test]
+        public void HomesNeedWood()
+        {
+            var city = Flat();
+            city.IgnoreRequirements = false;
+            city.Wood = 3;
+            Assert.AreEqual(PlaceResult.NoWood, city.Place(Id("casa_basica"), 5, 11));
+            city.Wood = 10;
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Id("casa_basica"), 5, 11));
+            Assert.AreEqual(6, city.Wood);
+            Assert.AreEqual(3, city.SellWood(3));
+            Assert.AreEqual(3, city.Wood);
+        }
+
+        /// <summary>Forest reserve north of the street (from row 14), with a forest station at its edge.</summary>
+        static City Woodland(out int station)
+        {
+            var city = Flat();
+            city.SetReserve(0, 14, 29, 29);
+            for (int y = 14; y < 30; y++)
+            for (int x = 0; x < 30; x++)
+                city.Terrain[city.Index(x, y)] = Terrain.Forest;
+            city.PlaceMany(Catalog.Road, City.Line(8, 11, 8, 12), out _);
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Id("caseta_forestal"), 8, 13));
+            Assert.AreEqual(PlaceResult.NeedsForest, city.CanPlace(Id("caseta_forestal"), 3, 9));
+            city.FinishConstruction();
+            station = city.Index(8, 13);
+            Assert.IsTrue(city.Working(station), "a forest station needs no power");
+            return city;
+        }
+
+        [Test]
+        public void TheLumberjackFellsMarkedTrees()
+        {
+            var city = Woodland(out int station);
+            Assert.AreEqual(FellResult.Ok, city.MarkTree(9, 15));
+            Assert.AreEqual(FellResult.AlreadyMarked, city.MarkTree(9, 15));
+            Assert.AreEqual(FellResult.TooFar, city.MarkTree(8, 29));
+            Assert.AreEqual(FellResult.NotATree, city.MarkTree(5, 5));
+            int tree = city.TakeMarked(station);
+            Assert.AreEqual(city.Index(9, 15), tree);
+            Assert.AreEqual(-1, city.TakeMarked(station));
+            int wood = city.Wood;
+            Assert.IsTrue(city.FellTree(tree));
+            city.DeliverWood(Catalog.WoodPerTree);
+            Assert.AreEqual(Terrain.Stumps, city.Terrain[tree]);
+            Assert.AreEqual(wood + Catalog.WoodPerTree, city.Wood);
+        }
+
+        [Test]
+        public void SawmillsFellByThemselvesAndTheForestGrowsBack()
+        {
+            var city = Woodland(out _);
+            city.Place(Id("generador"), 15, 11);
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Id("aserradero"), 17, 11));
+            city.FinishConstruction();
+            int wood = city.Wood;
+            city.StepDays(1);
+            Assert.Greater(city.Wood, wood);
+            int stumps = city.Terrain.Count(t => t == Terrain.Stumps || t == Terrain.Sapling);
+            Assert.Greater(stumps, 5);
+
+            // Without the sawmill the felled patch fills in again.
+            city.Bulldoze(17, 11);
+            city.StepDays(6);
+            Assert.Less(city.Terrain.Count(t => t == Terrain.Stumps), stumps / 2);
         }
     }
 }

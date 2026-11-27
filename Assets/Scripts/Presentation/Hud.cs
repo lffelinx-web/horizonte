@@ -20,7 +20,7 @@ namespace Horizonte.Presentation
         /// <summary>Whole number with spaces between thousands, as written in Spanish.</summary>
         public static string N(long v) => v.ToString("#,0", Numbers);
 
-        enum Popup { None, Finance, Alerts, Help, Settings }
+        enum Popup { None, Finance, Alerts, Help, Settings, Wood }
 
         sealed class Btn
         {
@@ -70,7 +70,8 @@ namespace Horizonte.Presentation
 
         // Top bar.
         InputField cityName;
-        Text levelText, popValue, popSub, satValue, satSub, moneyValue, moneySub;
+        Text levelText, popValue, popSub, satValue, satSub, moneyValue, moneySub, clockValue, clockDay, woodValue;
+        Image clockIcon;
         readonly Text[] resourceValues = new Text[4];
         Image satIcon;
         RectTransform levelFill;
@@ -86,7 +87,7 @@ namespace Horizonte.Presentation
         Image alertBadge;
         Text alertBadgeText;
         readonly List<string> alerts = new List<string>();
-        RectTransform popupPanel, taxRow, loanRow, settingsRow;
+        RectTransform popupPanel, taxRow, loanRow, settingsRow, woodRow;
         Text popupTitle, popupBody, taxText, loanText;
         Btn loanButton;
         Btn newCityButton;
@@ -186,6 +187,8 @@ namespace Horizonte.Presentation
             (popValue, popSub, _) = Stat(bar, "Población", 190, "people", new Color(.75f, .86f, 1f), "Población");
             (satValue, satSub, satIcon) = Stat(bar, "Satisfacción", 190, "smile", UiKit.Good, "Satisfacción");
             (moneyValue, moneySub, _) = Stat(bar, "Presupuesto", 240, "coin", UiKit.Gold, "Presupuesto");
+            BuildClock(bar);
+            BuildWood(bar);
             BuildResources(bar);
 
             // Demand: bars grow up when the city wants more of a zone and down when there is too much.
@@ -214,10 +217,34 @@ namespace Horizonte.Presentation
             MakeButton(gear, "Ajustes", 4, 15, 62, 62, 18, "gear", 36, null, 0, () => TogglePopup(Popup.Settings));
         }
 
+        /// <summary>Hour of the day with the sun or the moon, and the day number.</summary>
+        void BuildClock(RectTransform bar)
+        {
+            var b = Block(bar, "Hora", 150);
+            clockIcon = Icon(b, "sun", 34, 46, 40, UiKit.Gold);
+            clockDay = TextAt(b, 62, 9, 84, 24, 19, TextAnchor.MiddleLeft, UiKit.TextDim);
+            clockValue = TextAt(b, 62, 31, 84, 34, 29, TextAnchor.MiddleLeft, Color.white, true);
+            FitOneLine(clockValue, 16);
+        }
+
+        /// <summary>Wood in stock; touching it opens the window to sell it.</summary>
+        void BuildWood(RectTransform bar)
+        {
+            var b = Block(bar, "Madera", 160);
+            b.gameObject.AddComponent<Image>().color = Color.clear;
+            b.gameObject.AddComponent<Button>().onClick.AddListener(() => TogglePopup(Popup.Wood));
+            Icon(b, "wood", 34, 46, 42, new Color(.86f, .66f, .42f));
+            TextAt(b, 62, 9, 94, 24, 19, TextAnchor.MiddleLeft, UiKit.TextDim).text = "Madera";
+            woodValue = TextAt(b, 62, 31, 94, 34, 29, TextAnchor.MiddleLeft, Color.white, true);
+            FitOneLine(woodValue, 16);
+            var sub = TextAt(b, 62, 64, 94, 22, 18, TextAnchor.MiddleLeft, UiKit.AccentText);
+            sub.text = "Vender";
+        }
+
         /// <summary>What the city produces against what it uses: power, water, sewage and waste.</summary>
         void BuildResources(RectTransform bar)
         {
-            const float itemWidth = 172;
+            const float itemWidth = 150;
             var b = Block(bar, "Recursos", itemWidth * 4 + 16);
             TextAt(b, 14, 8, 400, 24, 19, TextAnchor.MiddleLeft, UiKit.TextDim).text = "Producción / Consumo";
             string[] icons = { "bolt", "water", "water", "trash" };
@@ -385,6 +412,11 @@ namespace Horizonte.Presentation
             loanButton = MakeButton(loanRow, "Pedir", 200, 6, 186, 44, 10, null, 0, $"Pedir $ {N(City.LoanAmount)}", 19, TakeLoan);
             loanButton.Back.color = UiKit.Accent;
 
+            woodRow = At("Vender madera", popupPanel, 22, 0, 396, 56);
+            var sellSome = MakeButton(woodRow, "Vender 10", 0, 0, 190, 56, 14, null, 0, "Vender 10", 21, () => SellWood(10));
+            sellSome.Back.color = UiKit.Accent;
+            MakeButton(woodRow, "Vender todo", 206, 0, 190, 56, 14, null, 0, "Vender todo", 21, () => SellWood(int.MaxValue));
+
             settingsRow = At("Opciones", popupPanel, 22, 0, 396, 56);
             newCityButton = MakeButton(settingsRow, "Nueva ciudad", 0, 0, 396, 56, 14, null, 0, "Empezar una ciudad nueva", 22, NewCity);
             newCityButton.Back.color = new Color(.45f, .14f, .13f, .95f);
@@ -419,22 +451,32 @@ namespace Horizonte.Presentation
             var c = game.City;
             taxRow.gameObject.SetActive(popup == Popup.Finance);
             loanRow.gameObject.SetActive(popup == Popup.Finance);
+            woodRow.gameObject.SetActive(popup == Popup.Wood);
             settingsRow.gameObject.SetActive(popup == Popup.Settings);
             switch (popup)
             {
                 case Popup.Finance:
                     popupTitle.text = "Finanzas";
                     int net = c.LastIncome - c.LastExpenses;
-                    popupBody.text = c.Day < City.DaysPerMonth
-                        ? "El primer balance llega al terminar el mes.\n"
+                    popupBody.text = !c.HasBudget
+                        ? "Los impuestos y el mantenimiento se cobran cada día a las 6:00. El primer balance llega el próximo amanecer.\n"
                         : $"Impuesto a habitantes:  <b>$ {N(c.LastResidentTax)}</b>\nImpuesto a comercios e industrias:  <b>$ {N(c.LastBusinessTax)}</b>\nMantenimiento:  <b>$ {N(c.LastUpkeep)}</b>\n" +
                           (c.LastLoanPayment > 0 ? $"Cuota del préstamo:  <b>$ {N(c.LastLoanPayment)}</b>\n" : "") +
-                          $"Balance del mes:  <b><color={Hex(net >= 0 ? UiKit.Good : UiKit.Bad)}>{Signed(net)}</color></b>\n";
-                    popupBody.text += "<color=#A9BCE0>Más impuesto da más dinero pero baja la satisfacción.</color>";
+                          $"Balance del día:  <b><color={Hex(net >= 0 ? UiKit.Good : UiKit.Bad)}>{Signed(net)}</color></b>\n";
+                    popupBody.text += "<color=#A9BCE0>Se cobra cada día a las 6:00. Más impuesto da más dinero pero baja la satisfacción.</color>";
                     taxText.text = $"{c.TaxRate} %";
-                    loanText.text = c.LoanBalance > 0 ? $"Debes $ {N(c.LoanBalance)}\n<color=#A9BCE0>$ {N(c.LoanPayment)} al mes</color>" : "Sin deudas\n<color=#A9BCE0>24 cuotas, 10 %</color>";
+                    loanText.text = c.LoanBalance > 0 ? $"Debes $ {N(c.LoanBalance)}\n<color=#A9BCE0>$ {N(c.LoanPayment)} al día</color>" : $"Sin deudas\n<color=#A9BCE0>{City.LoanDays} cuotas diarias, 10 %</color>";
                     loanButton.Label.text = c.CanBorrow ? $"Pedir $ {N(City.LoanAmount)}" : "Límite alcanzado";
                     loanButton.Back.color = c.CanBorrow ? UiKit.Accent : UiKit.ButtonColor;
+                    break;
+                case Popup.Wood:
+                    popupTitle.text = "Madera";
+                    int stations = c.Stations().Count, sawmills = c.Count("aserradero");
+                    popupBody.text = $"Tienes <b>{N(c.Wood)}</b> de madera.\n" +
+                        "Las casas y algunos edificios la usan para construirse; la que sobra se vende a " + $"<b>$ {Catalog.WoodPrice}</b> cada una.\n\n" +
+                        (stations + sawmills == 0
+                            ? "<color=#A9BCE0>Construye una <b>caseta forestal</b> junto a la reserva (Industria) y marca árboles con <b>Talar</b>.</color>"
+                            : $"<color=#A9BCE0>{stations} {(stations == 1 ? "caseta" : "casetas")} y {sawmills} {(sawmills == 1 ? "aserradero" : "aserraderos")} trabajando. Árboles marcados: {c.Marked.Count}.</color>");
                     break;
                 case Popup.Alerts:
                     popupTitle.text = "Avisos";
@@ -444,18 +486,19 @@ namespace Horizonte.Presentation
                     popupTitle.text = "Cómo se juega";
                     popupBody.text =
                         "Traza <b>calles</b> conectadas con la carretera y coloca los edificios junto a ellas. Empieza con un <b>generador</b>, unas casas y una tienda: sin calle, sin luz y sin empleos nadie llega.\n\n" +
+                        "Las casas se construyen con <b>madera</b>. Pon una <b>caseta forestal</b> en la entrada de la reserva y marca árboles con <b>Talar</b>: el leñador los corta y trae la madera. Un día dura 8 minutos y los impuestos se cobran cada mañana.\n\n" +
                         "<color=#A9BCE0>Un dedo construye o, en Explorar, mueve el mapa. Dos dedos mueven, acercan y giran. Toca un edificio para ver sus datos.</color>";
                     break;
                 case Popup.Settings:
                     popupTitle.text = "Ajustes";
-                    popupBody.text = $"Horizonte {Application.version}\n<color=#A9BCE0>La partida se guarda sola cada mes y al salir.</color>";
+                    popupBody.text = $"Horizonte {Application.version}\n<color=#A9BCE0>La partida se guarda sola cada hora del juego y al salir.</color>";
                     newCityButton.Label.text = Time.unscaledTime < resetArmedUntil ? "Toca otra vez para confirmar" : "Empezar una ciudad nueva";
                     break;
             }
             float bodyHeight = popupBody.preferredHeight;
             popupBody.rectTransform.sizeDelta = new Vector2(396, bodyHeight);
             float y = 58 + bodyHeight + 14;
-            foreach (var extra in new[] { taxRow, loanRow, settingsRow })
+            foreach (var extra in new[] { taxRow, loanRow, woodRow, settingsRow })
             {
                 if (!extra.gameObject.activeSelf) continue;
                 extra.anchoredPosition = new Vector2(22, -y);
@@ -469,6 +512,13 @@ namespace Horizonte.Presentation
                 float top = Mathf.Clamp(room - (y + 8), 12, 299);
                 popupPanel.anchoredPosition = new Vector2(100, -top);
             }
+        }
+
+        void SellWood(int amount)
+        {
+            int sold = game.City.SellWood(amount);
+            Toast(sold == 0 ? "No tienes madera para vender" : $"Vendiste {N(sold)} de madera por $ {N(sold * Catalog.WoodPrice)}");
+            Refresh();
         }
 
         void TakeLoan()
@@ -534,7 +584,7 @@ namespace Horizonte.Presentation
             if (c.Workers > c.Jobs + 10) alerts.Add($"Faltan empleos: {N(c.Workers - c.Jobs)} personas buscan trabajo.");
             if (isolated > 0) alerts.Add($"{N(isolated)} {(isolated == 1 ? "tramo" : "tramos")} de calle sin salida a la carretera.");
             if (c.Money < 0) alerts.Add("La tesorería está en números rojos.");
-            else if (c.Day >= City.DaysPerMonth && c.LastIncome < c.LastExpenses) alerts.Add("Gastas más de lo que ingresas cada mes.");
+            else if (c.HasBudget && c.LastIncome < c.LastExpenses) alerts.Add("Gastas más de lo que ingresas cada día.");
             if (c.TaxRate >= 13) alerts.Add("Los impuestos altos espantan a la gente.");
             alertBadge.gameObject.SetActive(alerts.Count > 0);
             alertBadgeText.text = alerts.Count.ToString();
@@ -587,7 +637,18 @@ namespace Horizonte.Presentation
             {
                 var def = c.DefAt(i);
                 Color col;
-                if (def == null) col = c.Terrain[i] == Terrain.Water ? water : c.Terrain[i] == Terrain.Forest ? forest : grass;
+                if (def == null)
+                {
+                    switch (c.Terrain[i])
+                    {
+                        case Terrain.Water: col = water; break;
+                        case Terrain.Forest: case Terrain.Sapling: col = forest; break;
+                        case Terrain.Mountain: col = new Color(.45f, .43f, .4f); break;
+                        case Terrain.Fertile: col = new Color(.46f, .47f, .25f); break;
+                        case Terrain.Stumps: col = new Color(.36f, .33f, .22f); break;
+                        default: col = grass; break;
+                    }
+                }
                 else if (def.IsRoad) col = new Color(.86f, .87f, .9f);
                 else col = Color.Lerp(Tools.CategoryColor(def.Category), Color.white, c.Construction[c.Anchor[i]] > 0 ? .7f : .3f);
                 mapPixels[i] = col;
@@ -611,14 +672,14 @@ namespace Horizonte.Presentation
         void BuildBottomBar()
         {
             var items = Tools.Bar;
-            const float w = 96, h = 94, gap = 5;
+            const float w = 90, h = 94, gap = 5;
             float width = items.Length * w + (items.Length - 1) * gap + 12;
             bottomBar = Rect("Construcción", wide, new Vector2(.5f, 0), new Vector2(.5f, 0), new Vector2(0, 12), new Vector2(width, h + 12), new Vector2(.5f, 0));
             Panel(bottomBar, UiKit.PanelColor, 20);
             for (int k = 0; k < items.Length; k++)
             {
                 var item = items[k];
-                var b = MakeButton(bottomBar, item.Name, 6 + k * (w + gap), 6, w, h, 16, item.Icon, 42, item.Name, 18, () => PickItem(item), true);
+                var b = MakeButton(bottomBar, item.Name, 6 + k * (w + gap), 6, w, h, 16, item.Icon, 42, item.Name, 16, () => PickItem(item), true);
                 barButtons.Add((item, b));
             }
 
@@ -873,17 +934,60 @@ namespace Horizonte.Presentation
             if (def == null)
             {
                 var t = c.Terrain[i];
-                infoTitle.text = t == Terrain.Water ? "Río" : t == Terrain.Forest ? "Bosque" : "Terreno libre";
-                infoSubtitle.text = t == Terrain.Water ? "Solo se cruza con un puente" : "Terreno";
-                infoTile.color = t == Terrain.Water ? new Color(.2f, .48f, .72f) : t == Terrain.Forest ? new Color(.22f, .45f, .22f) : new Color(.45f, .62f, .32f);
-                infoIcon.sprite = Icons.Get(t == Terrain.Water ? "water" : t == Terrain.Forest ? "forest" : "explore");
+                bool reserve = c.InReserve(selected.x, selected.y);
+                string icon = "explore";
+                switch (t)
+                {
+                    case Terrain.Water:
+                        infoTitle.text = "Río";
+                        infoSubtitle.text = "Solo se cruza con un puente";
+                        infoTile.color = new Color(.2f, .48f, .72f);
+                        icon = "water";
+                        break;
+                    case Terrain.Mountain:
+                        infoTitle.text = "Montaña";
+                        infoSubtitle.text = "No se puede construir · más adelante, minas";
+                        infoTile.color = new Color(.45f, .43f, .4f);
+                        icon = "mountain";
+                        break;
+                    case Terrain.Fertile:
+                        infoTitle.text = "Tierra fértil";
+                        infoSubtitle.text = "Buena para granjas";
+                        infoTile.color = new Color(.6f, .6f, .3f);
+                        icon = "tree";
+                        break;
+                    case Terrain.Stumps:
+                        infoTitle.text = "Tala reciente";
+                        infoSubtitle.text = "Los árboles vuelven a crecer";
+                        infoTile.color = new Color(.45f, .38f, .26f);
+                        icon = "axe";
+                        break;
+                    case Terrain.Sapling:
+                        infoTitle.text = "Árboles jóvenes";
+                        infoSubtitle.text = "Pronto serán bosque";
+                        infoTile.color = new Color(.3f, .55f, .3f);
+                        icon = "forest";
+                        break;
+                    case Terrain.Forest:
+                        infoTitle.text = reserve ? "Reserva forestal" : "Bosque";
+                        infoSubtitle.text = reserve ? "Márcalo con Talar para tener madera" : "Terreno";
+                        infoTile.color = new Color(.22f, .45f, .22f);
+                        icon = "forest";
+                        break;
+                    default:
+                        infoTitle.text = reserve ? "Reserva forestal" : "Terreno libre";
+                        infoSubtitle.text = reserve ? "Claro del bosque" : "Terreno";
+                        infoTile.color = new Color(.45f, .62f, .32f);
+                        break;
+                }
+                infoIcon.sprite = Icons.Get(icon);
                 AddCard("star", UiKit.Gold, "Atractivo", Signed(desire), desireColor);
-                if (t != Terrain.Water)
+                if (t != Terrain.Water && t != Terrain.Mountain)
                 {
                     var (power, powerColor) = YesNo(c.PowerCover[i]);
                     AddCard("bolt", UiKit.Warn, "Red eléctrica", power, powerColor);
                 }
-                if (t == Terrain.Forest) demolish = $"Talar  ·  $ {Catalog.ClearForestCost}";
+                if (City.IsTree(t) && !reserve) demolish = $"Talar  ·  $ {Catalog.ClearForestCost}";
                 game.View.ClearSelection();
             }
             else
@@ -959,8 +1063,8 @@ namespace Horizonte.Presentation
                 }
                 if (c.Construction[a] > 0)
                 {
-                    int total = Mathf.Max(1, Catalog.BuildDays(def)), left = c.Construction[a];
-                    AddRow("level", UiKit.Warn, "En construcción", $"{(total - left) * 100 / total} %  ·  faltan {left} {(left == 1 ? "día" : "días")}", UiKit.Warn);
+                    int total = Mathf.Max(1, Catalog.BuildTicks(def)), left = c.Construction[a];
+                    AddRow("level", UiKit.Warn, "En construcción", $"{(total - left) * 100 / total} %  ·  faltan {Duration(left)}", UiKit.Warn);
                 }
                 else if (!def.IsRoad && !working) AddRow("warning", UiKit.Bad, "No funciona", !c.Served[a] ? "sin calle conectada" : "sin electricidad", UiKit.Bad);
                 var (sw, sh) = c.Size(a);
@@ -980,7 +1084,7 @@ namespace Horizonte.Presentation
             if (upkeep > 0)
             {
                 upkeepRow.anchoredPosition = new Vector2(14, -y);
-                upkeepValue.text = def.IsRoad ? $"$ {upkeep} /mes por casilla" : $"$ {N(upkeep)} /mes";
+                upkeepValue.text = def.IsRoad ? $"$ {upkeep} /día por casilla" : $"$ {N(upkeep)} /día";
                 y += 46 + 12;
             }
             demolishButton.Root.gameObject.SetActive(demolish != null);
@@ -1085,16 +1189,25 @@ namespace Horizonte.Presentation
             moneyValue.text = $"$ {N(c.Money)}";
             moneyValue.color = c.Money < 0 ? UiKit.Bad : Color.white;
             int net = c.LastIncome - c.LastExpenses;
-            if (c.Day < City.DaysPerMonth)
+            if (!c.HasBudget)
             {
-                moneySub.text = "Primer mes";
+                moneySub.text = "Cobro a las 6:00";
                 moneySub.color = UiKit.TextDim;
             }
             else
             {
-                moneySub.text = $"{Signed(net)} /mes";
+                moneySub.text = $"{Signed(net)} /día";
                 moneySub.color = net >= 0 ? UiKit.Good : UiKit.Bad;
             }
+
+            float hour = game.TimeOfDay * 24;
+            int hh = Mathf.FloorToInt(hour) % 24, mm = Mathf.FloorToInt(hour * 60) % 60 / 5 * 5;
+            clockValue.text = $"{hh:00}:{mm:00}";
+            clockDay.text = $"Día {c.Day + 1}";
+            bool daylight = DayNight.SunHeight(game.TimeOfDay) > -.05f;
+            clockIcon.sprite = Icons.Get(daylight ? "sun" : "moon");
+            clockIcon.color = daylight ? UiKit.Gold : new Color(.75f, .82f, 1f);
+            woodValue.text = N(c.Wood);
 
             ShowResource(0, c.PowerSupply, c.PowerDemand, "MW");
             ShowResource(1, c.UtilitySupply(Service.Water), c.UtilityDemand(Service.Water), "m³");
@@ -1131,6 +1244,13 @@ namespace Horizonte.Presentation
         {
             if (what == "finanzas") TogglePopup(Popup.Finance);
             foreach (var item in Tools.Bar) if (item.Name == what) PickItem(item);
+        }
+
+        /// <summary>Ticks as hours and minutes: "2 h 15 min", "40 min".</summary>
+        static string Duration(int ticks)
+        {
+            int minutes = ticks * 60 / City.TicksPerHour, h = minutes / 60, m = minutes % 60;
+            return h == 0 ? $"{m} min" : m == 0 ? $"{h} h" : $"{h} h {m} min";
         }
 
         static string Signed(int v) => v > 0 ? $"+{N(v)}" : v < 0 ? $"−{N(-v)}" : "0";

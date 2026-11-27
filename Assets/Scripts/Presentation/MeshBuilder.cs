@@ -117,6 +117,67 @@ namespace Horizonte.Presentation
             }
         }
 
+        /// <summary>Cone with smooth normals around its side (foliage that should not look faceted).</summary>
+        public void SmoothCone(int slot, Vector3 baseCentre, float radius, float height, int sides)
+        {
+            int first = vertices.Count;
+            var top = baseCentre + Vector3.up * height;
+            for (int s = 0; s <= sides; s++)
+            {
+                float a = s * Mathf.PI * 2 / sides, mid = (s + .5f) * Mathf.PI * 2 / sides;
+                var dir = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                var dirMid = new Vector3(Mathf.Cos(mid), 0, Mathf.Sin(mid));
+                vertices.Add(baseCentre + dir * radius);
+                normals.Add((dir * height + Vector3.up * radius).normalized);
+                uvs.Add(new Vector2(s / (float)sides, 0));
+                vertices.Add(top);
+                normals.Add((dirMid * height + Vector3.up * radius).normalized);
+                uvs.Add(new Vector2(s / (float)sides, 1));
+            }
+            var t = triangles[slot];
+            for (int s = 0; s < sides; s++)
+            {
+                int ring = first + s * 2, next = ring + 2;
+                t.Add(next); t.Add(ring); t.Add(ring + 1);
+            }
+            // Underside, so the cone reads as solid from low angles.
+            int centre = vertices.Count;
+            vertices.Add(baseCentre);
+            normals.Add(Vector3.down);
+            uvs.Add(Vector2.zero);
+            for (int s = 0; s < sides; s++)
+            {
+                int ring = first + s * 2, next = ring + 2;
+                t.Add(ring); t.Add(next); t.Add(centre);
+            }
+        }
+
+        /// <summary>Ellipsoid with smooth normals (a round crown of leaves, a rock).</summary>
+        public void Ellipsoid(int slot, Vector3 centre, Vector3 radii, int segments = 7, int rings = 5)
+        {
+            int first = vertices.Count;
+            for (int r = 0; r <= rings; r++)
+            {
+                float phi = Mathf.PI * r / rings;
+                for (int s = 0; s <= segments; s++)
+                {
+                    float theta = Mathf.PI * 2 * s / segments;
+                    var dir = new Vector3(Mathf.Cos(theta) * Mathf.Sin(phi), -Mathf.Cos(phi), Mathf.Sin(theta) * Mathf.Sin(phi));
+                    vertices.Add(centre + Vector3.Scale(dir, radii));
+                    normals.Add(new Vector3(dir.x / radii.x, dir.y / radii.y, dir.z / radii.z).normalized);
+                    uvs.Add(new Vector2(s / (float)segments, r / (float)rings));
+                }
+            }
+            var t = triangles[slot];
+            for (int r = 0; r < rings; r++)
+            for (int s = 0; s < segments; s++)
+            {
+                int a = first + r * (segments + 1) + s, b = a + 1, d = a + segments + 1, c = d + 1;
+                t.Add(a); t.Add(d); t.Add(c);
+                t.Add(a); t.Add(c); t.Add(b);
+            }
+        }
+
         public Mesh ToMesh(Mesh mesh = null)
         {
             if (mesh == null) mesh = new Mesh();

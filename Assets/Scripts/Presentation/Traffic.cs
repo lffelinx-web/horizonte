@@ -6,14 +6,12 @@ namespace Horizonte.Presentation
 {
     /// <summary>
     /// Life on the streets, near the camera only: people walk out of buildings along the sidewalks, and homes with a
-    /// garage have a car that leaves in the morning and parks again in the afternoon. It runs on its own clock (a day
-    /// every two minutes), much slower than the simulation's, so trips have time to be seen.
+    /// garage have a car that leaves in the morning and parks again in the afternoon, on the city clock (a day lasts
+    /// eight minutes).
     /// Models named persona*.fbx and coche*.fbx in Assets/Modelos replace the simple placeholders.
     /// </summary>
     public sealed class Traffic : MonoBehaviour
     {
-        /// <summary>Real seconds per day of street life, at normal speed.</summary>
-        public const float DaySeconds = 120;
         const int MaxWalkers = 45;
         const float WalkSpeed = 1.4f, CarSpeed = 7.5f, ReverseSpeed = 2.2f;
         /// <summary>Distance from the middle of a street to the middle of its sidewalk, and to the middle of a lane.</summary>
@@ -28,19 +26,8 @@ namespace Horizonte.Presentation
             ["casa_ampliada"] = (new Vector3(3.5f, 0, -5.6f), new Vector3(3.5f, 0, -10.4f)),
         };
 
-        /// <summary>0 is midnight, .25 six in the morning, .5 noon. Setting it puts every car where it belongs at that hour.</summary>
-        public float TimeOfDay
-        {
-            get => timeOfDay;
-            set
-            {
-                timeOfDay = Mathf.Repeat(value, 1);
-                foreach (var g in garages.Values) DropCar(g);
-                garages.Clear();
-                rescan = 0;
-            }
-        }
-        float timeOfDay = .3f;
+        /// <summary>0 is midnight, .25 six in the morning, .5 noon; it follows the city's clock.</summary>
+        public float TimeOfDay { get; private set; } = .3f;
 
         sealed class Mover
         {
@@ -75,9 +62,9 @@ namespace Horizonte.Presentation
         int focusX, focusY, radius;
         uint random = 12345;
 
-        GameObject[] personModels, carModels;
-        Mesh personMesh, carMesh;
-        Material[][] personLooks, carLooks;
+        GameObject[] carModels;
+        Mesh carMesh;
+        Material[][] carLooks;
 
         public void Init(City c, CameraRig r)
         {
@@ -89,16 +76,26 @@ namespace Horizonte.Presentation
             idleCars.Clear();
             garages.Clear();
             nearby.Clear();
-            if (personMesh == null) LoadLooks();
+            if (carMesh == null) LoadLooks();
         }
 
-        /// <summary>Advances the street clock. Speed is 0 when paused, 1 normal, faster at higher speeds.</summary>
-        public void Tick(float speedFactor)
+        /// <summary>
+        /// Moves everyone along. Speed is 0 when paused and 1 at normal speed; the time of day comes from the city. When the
+        /// clock jumps (a loaded game, a screenshot set to another hour) every car is put back where it belongs.
+        /// </summary>
+        public void Tick(float speedFactor, float timeOfDay)
         {
             if (city == null) return;
             speed = speedFactor;
             float dt = Time.deltaTime * speed;
-            timeOfDay = Mathf.Repeat(timeOfDay + dt / DaySeconds, 1);
+            float jump = Mathf.Abs(Mathf.DeltaAngle(TimeOfDay * 360, timeOfDay * 360)) / 360;
+            TimeOfDay = timeOfDay;
+            if (jump > .02f)
+            {
+                foreach (var g in garages.Values) DropCar(g);
+                garages.Clear();
+                rescan = 0;
+            }
 
             bool visible = rig.Distance < VisibleDistance;
             rescan -= Time.deltaTime;
@@ -591,27 +588,12 @@ namespace Horizonte.Presentation
 
         void LoadLooks()
         {
-            var people = new List<GameObject>();
             var cars = new List<GameObject>();
             foreach (var model in Resources.LoadAll<GameObject>("Buildings"))
-            {
-                string n = model.name.ToLowerInvariant();
-                if (n.StartsWith("persona")) people.Add(model);
-                else if (n.StartsWith("coche")) cars.Add(model);
-            }
-            personModels = people.ToArray();
+                if (model.name.ToLowerInvariant().StartsWith("coche")) cars.Add(model);
             carModels = cars.ToArray();
 
             var b = new MeshBuilder(4);
-            // Trousers, shirt, skin, hair; 1.7 m tall.
-            b.Box(0, new Vector3(-.09f, 0, 0), new Vector3(.15f, .82f, .2f));
-            b.Box(0, new Vector3(.09f, 0, 0), new Vector3(.15f, .82f, .2f));
-            b.Box(1, new Vector3(0, .8f, 0), new Vector3(.44f, .58f, .24f));
-            b.Cylinder(2, new Vector3(0, 1.38f, 0), .12f, .25f, 8);
-            b.Box(3, new Vector3(0, 1.6f, -.01f), new Vector3(.25f, .09f, .26f));
-            personMesh = b.ToMesh();
-
-            b = new MeshBuilder(4);
             // Body, cabin glass, wheels, lights; front toward +Z.
             b.Box(0, new Vector3(0, .28f, 0), new Vector3(1.78f, .62f, 4.2f));
             b.Box(1, new Vector3(0, .9f, -.25f), new Vector3(1.56f, .52f, 2.2f));
@@ -623,14 +605,6 @@ namespace Horizonte.Presentation
             b.Box(3, new Vector3(.6f, .55f, 2.08f), new Vector3(.36f, .16f, .06f));
             carMesh = b.ToMesh();
 
-            var shirts = new[] { "#D9534F", "#F0AD4E", "#5BC0DE", "#5CB85C", "#F7F7F2", "#8E6CC8", "#E58AB0", "#2F6FAE" };
-            var trousers = new[] { "#2E3A4F", "#5A4A3A", "#3B3B3B", "#6C7A89" };
-            var skins = new[] { "#F1C7A5", "#C98E64", "#8D5A3B", "#E0AC82" };
-            var hair = new[] { "#2B211C", "#5A3B22", "#9A6B3F", "#1C1C1C" };
-            personLooks = new Material[12][];
-            for (int k = 0; k < personLooks.Length; k++)
-                personLooks[k] = new[] { Colour(trousers[k % 4]), Colour(shirts[k % 8]), Colour(skins[(k * 3) % 4]), Colour(hair[(k * 5 + 1) % 4]) };
-
             var bodies = new[] { "#C8302E", "#F2F2EE", "#2B5C9E", "#3A3D42", "#E2B13C", "#7FA7C9" };
             var glass = Colour("#1E2B38", .85f);
             var tyre = Colour("#1A1A1A");
@@ -639,48 +613,12 @@ namespace Horizonte.Presentation
             for (int k = 0; k < bodies.Length; k++) carLooks[k] = new[] { Colour(bodies[k], .7f), glass, tyre, lights };
         }
 
-        readonly Dictionary<string, Material> colours = new Dictionary<string, Material>();
-
-        Material Colour(string hex, float smoothness = .2f)
-        {
-            string key = hex + smoothness;
-            if (colours.TryGetValue(key, out var m)) return m;
-            ColorUtility.TryParseHtmlString(hex, out var c);
-            // Copies a palette material so the shader is the one already in the build.
-            m = new Material(Palette.Get("StreetLamp")) { name = "Gente " + hex };
-            m.SetColor("_BaseColor", c);
-            m.SetFloat("_Smoothness", smoothness);
-            m.SetFloat("_Metallic", 0);
-            m.enableInstancing = true;
-            return colours[key] = m;
-        }
+        static Material Colour(string hex, float smoothness = .2f) => Figures.Colour(hex, smoothness);
 
         Mover NewWalker()
         {
-            var go = new GameObject("Persona");
-            go.transform.SetParent(transform, false);
-            var m = new Mover { Go = go };
-            uint look = Next();
-            GameObject body;
-            if (personModels.Length > 0)
-            {
-                body = Instantiate(personModels[look % (uint)personModels.Length]);
-                body.transform.localRotation = Quaternion.Euler(0, 180, 0);
-            }
-            else
-            {
-                body = new GameObject("Cuerpo", typeof(MeshFilter), typeof(MeshRenderer));
-                body.GetComponent<MeshFilter>().sharedMesh = personMesh;
-                body.GetComponent<MeshRenderer>().sharedMaterials = personLooks[look % (uint)personLooks.Length];
-            }
-            body.transform.SetParent(go.transform, false);
-            foreach (var r in body.GetComponentsInChildren<MeshRenderer>())
-            {
-                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                r.receiveShadows = false;
-            }
-            m.Body = body.transform;
-            return m;
+            var go = Figures.Create(transform, Next());
+            return new Mover { Go = go, Body = go.transform.GetChild(0) };
         }
 
         Mover NewCar()

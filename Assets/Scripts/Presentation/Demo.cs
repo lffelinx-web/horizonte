@@ -47,8 +47,21 @@ namespace Horizonte.Presentation
             Try(city, "recoleccion_basura", cx - 24, cy + 1);
             Fill(city, Houses, cx - 17, cy + 1, cx - 1, cy + 9);
 
+            // Wood: a forest station at the gate of the reserve, a sawmill beside the road to it, and a generator.
+            int gx = city.GateX, ry = city.ReserveY0;
+            Try(city, "caseta_forestal", gx - 1, ry - 1);
+            Try(city, "aserradero", gx + 1, ry - 3);
+            Try(city, "generador", gx - 1, ry - 3);
+
             city.IgnoreRequirements = false;
             for (int d = 0; d < 600; d++) city.Step();
+            // Trees for the lumberjack, nearest first.
+            var trees = new List<int>();
+            for (int y = city.ReserveY0; y <= city.ReserveY1; y++)
+            for (int x = city.ReserveX0; x <= city.ReserveX1; x++)
+                if (city.Terrain[city.Index(x, y)] == Terrain.Forest) trees.Add(city.Index(x, y));
+            trees.Sort((a, b) => Gap(city, a, gx, ry).CompareTo(Gap(city, b, gx, ry)));
+            for (int k = 0; k < trees.Count && city.Marked.Count < 5; k++) city.MarkTree(trees[k] % city.Width, trees[k] / city.Width);
             city.Money = 48_250;
             return city;
         }
@@ -77,6 +90,8 @@ namespace Horizonte.Presentation
             city.Refresh();
             return city;
         }
+
+        static int Gap(City city, int i, int x, int y) => System.Math.Abs(i % city.Width - x) + System.Math.Abs(i / city.Width - y);
 
         static void Road(City city, IEnumerable<(int x, int y)> tiles) => city.PlaceMany(Catalog.Road, tiles, out _);
 

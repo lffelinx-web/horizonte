@@ -266,6 +266,29 @@ namespace Horizonte.Presentation
                 case "water":
                     p.Poly(.5f, .94f, .2f, .46f, .8f, .46f).Circle(.5f, .38f, .3f);
                     break;
+                case "axe":
+                    p.Line(.22f, .1f, .66f, .82f, .09f);
+                    p.Poly(.5f, .7f, .7f, .94f, .94f, .74f, .78f, .52f);
+                    break;
+                case "wood":
+                    p.Circle(.3f, .3f, .2f).Circle(.7f, .3f, .2f).Circle(.5f, .64f, .2f);
+                    p.Ring(.3f, .3f, .1f, .04f, true).Ring(.7f, .3f, .1f, .04f, true).Ring(.5f, .64f, .1f, .04f, true);
+                    break;
+                case "sun":
+                    p.Circle(.5f, .5f, .22f);
+                    for (int k = 0; k < 8; k++)
+                    {
+                        float a = k * Mathf.PI / 4;
+                        p.Line(.5f + Mathf.Cos(a) * .32f, .5f + Mathf.Sin(a) * .32f, .5f + Mathf.Cos(a) * .44f, .5f + Mathf.Sin(a) * .44f, .07f);
+                    }
+                    break;
+                case "moon":
+                    p.Circle(.5f, .5f, .38f).Circle(.66f, .62f, .32f, true);
+                    break;
+                case "mountain":
+                    p.Poly(.04f, .1f, .38f, .82f, .62f, .38f, .7f, .54f, .96f, .1f);
+                    p.Poly(new[] { .3f, .65f, .38f, .82f, .46f, .65f, .38f, .7f }, true);
+                    break;
                 default:
                     p.Circle(.5f, .5f, .3f);
                     break;

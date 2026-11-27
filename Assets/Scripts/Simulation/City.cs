@@ -3,16 +3,26 @@ using System.Collections.Generic;
 
 namespace Horizonte.Simulation
 {
-    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked, NoRoad, NeedsWater }
+    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked, NoRoad, NeedsWater, Mountain, Reserve, NoWood, NeedsForest }
+
+    /// <summary>What happens when the player marks a tree to be felled.</summary>
+    public enum FellResult { Ok, NotATree, NoStation, TooFar, AlreadyMarked }
 
     /// <summary>
-    /// The whole city: a grid of 10 m tiles plus money, time and statistics. One call to <see cref="Step"/> is one day.
+    /// The whole city: a grid of 10 m tiles plus money, wood, time and statistics. One call to <see cref="Step"/> is five
+    /// game minutes (a tick); a day has 288 and lasts eight minutes of real time.
     /// The player places every building by hand next to a street; homes fill up with residents over time, shops and
     /// factories offer jobs, plants feed the grid and services cover the homes around them.
     /// Grid coordinates: x grows east, y grows north. Index = y * Width + x.
     /// </summary>
     public sealed class City
     {
+        public const int TicksPerHour = 12, HoursPerDay = 24, TicksPerDay = TicksPerHour * HoursPerDay;
+        /// <summary>Taxes and upkeep are settled every day at six in the morning.</summary>
+        public const int BudgetTick = 6 * TicksPerHour;
+        /// <summary>New cities start at seven in the morning of the first day.</summary>
+        public const int StartTick = 7 * TicksPerHour;
+        public const int StartWood = 30;
         public const int DaysPerMonth = 30;
         public const int MonthsPerYear = 12;
         public const int StartMoney = 25000;
@@ -25,7 +35,7 @@ namespace Horizonte.Simulation
         public readonly int[] Anchor;
         /// <summary>Direction the building faces: 0 south, 1 west, 2 north, 3 east. Read at the anchor.</summary>
         public readonly byte[] Rotation;
-        /// <summary>Days left until a building is finished, read at its anchor; it does not work meanwhile.</summary>
+        /// <summary>Ticks left until a building is finished, read at its anchor; it does not work meanwhile.</summary>
         public readonly byte[] Construction;
         /// <summary>Residents living in a home, read at its anchor.</summary>
         public readonly int[] Occupants;
@@ -42,7 +52,11 @@ namespace Horizonte.Simulation
         public readonly ushort[] Coverage;
 
         public long Money;
-        public int Day;
+        public int Wood = StartWood;
+        /// <summary>Five-minute steps since the city was founded.</summary>
+        public int Tick = StartTick;
+        /// <summary>Seed the map was generated from; it also shapes the mountains drawn around it.</summary>
+        public uint MapSeed;
         public string Name = "Horizonte";
         public int TaxRate = 9;
         public uint RngState;
@@ -70,8 +84,8 @@ namespace Horizonte.Simulation
         public int LastUpkeep { get; private set; }
         public int LastLoanPayment { get; private set; }
 
-        public const int LoanAmount = 10000, LoanMonths = 24, MaxLoans = 5;
-        /// <summary>Money still owed to the bank (10 % interest included), paid off in monthly instalments.</summary>
+        public const int LoanAmount = 10000, LoanDays = 10, MaxLoans = 5;
+        /// <summary>Money still owed to the bank (10 % interest included), paid off in daily instalments.</summary>
         public long LoanBalance;
         public int LoanPayment;
         /// <summary>How happy residents are, 0 to 100 (0 while nobody lives in the city).</summary>
@@ -80,11 +94,16 @@ namespace Horizonte.Simulation
         public int CityBonus { get; private set; }
         readonly int[] serviceCoverage = new int[16];
 
+        public int Day => Tick / TicksPerDay;
+        /// <summary>Hour of the day, 0 to 24 with fractions.</summary>
+        public float Hour => Tick % TicksPerDay / (float)TicksPerHour;
         public int Month => Day / DaysPerMonth % MonthsPerYear;
         public int Year => Day / (DaysPerMonth * MonthsPerYear) + 1;
+        /// <summary>Whether the first daily budget has been settled.</summary>
+        public bool HasBudget => LastIncome != 0 || LastExpenses != 0;
 
-        /// <summary>Raised on the first day of every month, after the budget.</summary>
-        public event Action MonthPassed;
+        /// <summary>Raised every game hour, and every morning after the budget.</summary>
+        public event Action HourPassed, DayPassed;
 
         readonly List<int> changed = new List<int>();
         readonly HashSet<int> changedSet = new HashSet<int>();
@@ -183,6 +202,7 @@ namespace Horizonte.Simulation
             if (def == null) return PlaceResult.Occupied;
             var (fw, fh) = Footprint(def, turned);
             if (!IgnoreRequirements && Population < def.MinPopulation) return PlaceResult.Locked;
+            bool mountain = false, reserve = false;
             for (int dy = 0; dy < fh; dy++)
             for (int dx = 0; dx < fw; dx++)
             {
@@ -190,13 +210,19 @@ namespace Horizonte.Simulation
                 int i = Index(x + dx, y + dy);
                 bool water = Terrain[i] == Simulation.Terrain.Water;
                 if (water != def.Bridge) return water ? PlaceResult.Water : PlaceResult.Occupied;
+                mountain |= Terrain[i] == Simulation.Terrain.Mountain;
+                reserve |= InReserve(x + dx, y + dy);
                 if (Building[i] == Catalog.None) continue;
                 // A street can be rebuilt as an avenue and back.
                 var there = DefAt(i);
                 bool reroad = def.IsRoad && !def.Bridge && there.IsRoad && !there.Bridge && Building[i] != id;
                 if (!reroad) return PlaceResult.Occupied;
             }
+            if (mountain) return PlaceResult.Mountain;
+            if (reserve) return PlaceResult.Reserve;
             if (!def.IsRoad && !Touches(x, y, fw, fh, IsRoad)) return PlaceResult.NoRoad;
+            if (def.NeedsForest && !Touches(x, y, fw, fh, InReserve)) return PlaceResult.NeedsForest;
+            if (!IgnoreRequirements && Wood < def.Wood) return PlaceResult.NoWood;
             if (def.NeedsWater && !Touches(x, y, fw, fh, (tx, ty) => InBounds(tx, ty) && Terrain[Index(tx, ty)] == Simulation.Terrain.Water))
                 return PlaceResult.NeedsWater;
             return Money >= PlacementCost(id, x, y, turned) ? PlaceResult.Ok : PlaceResult.NoMoney;
@@ -218,7 +244,7 @@ namespace Horizonte.Simulation
             var (fw, fh) = Footprint(def, turned);
             for (int dy = 0; dy < fh; dy++)
             for (int dx = 0; dx < fw; dx++)
-                if (InBounds(x + dx, y + dy) && Terrain[Index(x + dx, y + dy)] == Simulation.Terrain.Forest) cost += Catalog.ClearForestCost;
+                if (InBounds(x + dx, y + dy) && IsTree(Terrain[Index(x + dx, y + dy)])) cost += Catalog.ClearForestCost;
             return cost;
         }
 
@@ -228,6 +254,7 @@ namespace Horizonte.Simulation
             if (result != PlaceResult.Ok) return result;
             var def = Catalog.Get(id);
             Money -= PlacementCost(id, x, y, turned);
+            if (!IgnoreRequirements) Wood -= def.Wood;
             int anchor = Index(x, y);
             var (fw, fh) = Footprint(def, turned);
             turned &= def.Width != def.Height;
@@ -235,14 +262,14 @@ namespace Horizonte.Simulation
             for (int dx = 0; dx < fw; dx++)
             {
                 int i = Index(x + dx, y + dy);
-                if (Terrain[i] == Simulation.Terrain.Forest) Terrain[i] = Simulation.Terrain.Grass;
+                if (IsTree(Terrain[i]) || Terrain[i] == Simulation.Terrain.Stumps) Terrain[i] = Simulation.Terrain.Grass;
                 Building[i] = id;
                 Anchor[i] = anchor;
                 Occupants[i] = 0;
                 MarkChanged(i);
             }
             Rotation[anchor] = Facing(x, y, fw, fh, def.Width != def.Height, turned);
-            Construction[anchor] = (byte)Catalog.BuildDays(def);
+            Construction[anchor] = (byte)Catalog.BuildTicks(def);
             if (def.IsRoad) RefreshRoadNeighbours(x, y);
             UpdateNetworks();
             UpdateStats();
@@ -261,7 +288,7 @@ namespace Horizonte.Simulation
                 else
                 {
                     if (firstProblem == PlaceResult.Ok) firstProblem = r;
-                    if (r == PlaceResult.NoMoney) break;
+                    if (r == PlaceResult.NoMoney || r == PlaceResult.NoWood) break;
                 }
             }
             return placed;
@@ -274,7 +301,7 @@ namespace Horizonte.Simulation
             int i = Index(x, y);
             if (Building[i] == Catalog.None)
             {
-                if (Terrain[i] != Simulation.Terrain.Forest || Money < Catalog.ClearForestCost) return false;
+                if (!IsTree(Terrain[i]) || InReserve(x, y) || Money < Catalog.ClearForestCost) return false;
                 Money -= Catalog.ClearForestCost;
                 Terrain[i] = Simulation.Terrain.Grass;
                 MarkChanged(i);
@@ -373,12 +400,188 @@ namespace Horizonte.Simulation
             return count;
         }
 
-        /// <summary>A building works when it touches a connected street and has power (plants only need the street).</summary>
+        /// <summary>A building works when it touches a connected street and has power (plants and buildings that use none only need the street).</summary>
         public bool Working(int anchor)
         {
             var def = DefAt(anchor);
             if (def == null || def.IsRoad) return false;
-            return Served[anchor] && Construction[anchor] == 0 && (def.Kind == Kind.Power || Powered[anchor]);
+            return Served[anchor] && Construction[anchor] == 0 && (def.Kind == Kind.Power || def.PowerUse == 0 || Powered[anchor]);
+        }
+
+        // ---------------------------------------------------------------- forest and wood
+
+        /// <summary>The fenced forest reserve (inclusive tile bounds), where wood comes from. Nothing is built inside.</summary>
+        public int ReserveX0 = -1, ReserveY0 = -1, ReserveX1 = -2, ReserveY1 = -2;
+        /// <summary>Column of the gate in the south fence of the reserve, where the road from the highway arrives.</summary>
+        public int GateX = -1;
+
+        public void SetReserve(int x0, int y0, int x1, int y1)
+        {
+            ReserveX0 = x0;
+            ReserveY0 = y0;
+            ReserveX1 = x1;
+            ReserveY1 = y1;
+        }
+
+        public bool InReserve(int x, int y) => x >= ReserveX0 && x <= ReserveX1 && y >= ReserveY0 && y <= ReserveY1;
+
+        public static bool IsTree(Terrain t) => t == Simulation.Terrain.Forest || t == Simulation.Terrain.Sapling;
+
+        /// <summary>Trees the player marked for felling, in the order they were marked.</summary>
+        public readonly List<int> Marked = new List<int>();
+
+        /// <summary>Marks a tree of the reserve for the lumberjack of a forest station in reach.</summary>
+        public FellResult MarkTree(int x, int y)
+        {
+            if (!InBounds(x, y) || !InReserve(x, y) || Terrain[Index(x, y)] != Simulation.Terrain.Forest) return FellResult.NotATree;
+            int i = Index(x, y);
+            if (Marked.Contains(i)) return FellResult.AlreadyMarked;
+            bool any = false;
+            foreach (int s in Stations())
+            {
+                any = true;
+                if (Distance(s, i) <= DefAt(s).LumberReach)
+                {
+                    Marked.Add(i);
+                    return FellResult.Ok;
+                }
+            }
+            return any ? FellResult.TooFar : FellResult.NoStation;
+        }
+
+        /// <summary>Working forest stations whose lumberjack fells marked trees.</summary>
+        public List<int> Stations()
+        {
+            var list = new List<int>();
+            for (int i = 0; i < Building.Length; i++)
+            {
+                if (Anchor[i] != i) continue;
+                var def = DefAt(i);
+                if (def != null && def.LumberReach > 0 && !def.AutoFell && Working(i)) list.Add(i);
+            }
+            return list;
+        }
+
+        /// <summary>The next marked tree in reach of a station, taken off the list; -1 when there is none.</summary>
+        public int TakeMarked(int station)
+        {
+            var def = DefAt(station);
+            if (def == null) return -1;
+            for (int k = 0; k < Marked.Count; k++)
+            {
+                int i = Marked[k];
+                if (Terrain[i] != Simulation.Terrain.Forest)
+                {
+                    Marked.RemoveAt(k--);
+                    continue;
+                }
+                if (Distance(station, i) > def.LumberReach) continue;
+                Marked.RemoveAt(k);
+                return i;
+            }
+            return -1;
+        }
+
+        /// <summary>Cuts down the trees of a tile, leaving stumps that grow back. False if there was no tree.</summary>
+        public bool FellTree(int i)
+        {
+            if (Terrain[i] != Simulation.Terrain.Forest) return false;
+            Terrain[i] = Simulation.Terrain.Stumps;
+            MarkChanged(i);
+            return true;
+        }
+
+        /// <summary>Wood carried into a station by its lumberjack.</summary>
+        public void DeliverWood(int amount) => Wood += amount;
+
+        /// <summary>Sells wood for <see cref="Catalog.WoodPrice"/> each. Returns how much was sold.</summary>
+        public int SellWood(int amount)
+        {
+            amount = Math.Max(0, Math.Min(amount, Wood));
+            Wood -= amount;
+            Money += amount * Catalog.WoodPrice;
+            return amount;
+        }
+
+        /// <summary>A tree a sawmill's crew is on its way to fell, and the tick it comes down.</summary>
+        public struct SawmillJob
+        {
+            public int Station, Tile, Due;
+        }
+
+        /// <summary>Trees the sawmills' crews are working on (the view sends a lumberjack to each).</summary>
+        public readonly List<SawmillJob> SawmillJobs = new List<SawmillJob>();
+
+        /// <summary>Hours between a sawmill choosing a tree and felling it: the walk there and the work.</summary>
+        public const int SawmillJobTicks = 2 * TicksPerHour;
+
+        /// <summary>Every hour each working sawmill sends its crew to the nearest standing trees of the reserve, two at a time.</summary>
+        void RunSawmills()
+        {
+            for (int s = 0; s < Building.Length; s++)
+            {
+                if (Anchor[s] != s) continue;
+                var def = DefAt(s);
+                if (def == null || !def.AutoFell || !Working(s)) continue;
+                int busy = 0;
+                foreach (var job in SawmillJobs) if (job.Station == s) busy++;
+                if (busy >= 2) continue;
+                int best = -1;
+                float bestDistance = float.MaxValue;
+                for (int y = Math.Max(ReserveY0, 0); y <= Math.Min(ReserveY1, Height - 1); y++)
+                for (int x = Math.Max(ReserveX0, 0); x <= Math.Min(ReserveX1, Width - 1); x++)
+                {
+                    int i = Index(x, y);
+                    if (Terrain[i] != Simulation.Terrain.Forest || Marked.Contains(i) || SawmillJobs.Exists(j => j.Tile == i)) continue;
+                    float d = Distance(s, i);
+                    if (d <= def.LumberReach && d < bestDistance)
+                    {
+                        bestDistance = d;
+                        best = i;
+                    }
+                }
+                if (best >= 0) SawmillJobs.Add(new SawmillJob { Station = s, Tile = best, Due = Tick + SawmillJobTicks });
+            }
+        }
+
+        /// <summary>Trees whose time has come fall, and their wood goes to the city.</summary>
+        void FinishSawmillJobs()
+        {
+            for (int k = SawmillJobs.Count - 1; k >= 0; k--)
+            {
+                var job = SawmillJobs[k];
+                if (Tick < job.Due) continue;
+                SawmillJobs.RemoveAt(k);
+                if (DefAt(job.Station)?.AutoFell == true && FellTree(job.Tile)) Wood += Catalog.WoodPerSawmillTree;
+            }
+        }
+
+        /// <summary>
+        /// Once an hour: stumps next to standing forest sprout saplings, and saplings grow into forest, each in about a day
+        /// and a quarter.
+        /// </summary>
+        void Regrow()
+        {
+            for (int i = 0; i < Terrain.Length; i++)
+            {
+                var t = Terrain[i];
+                if (t == Simulation.Terrain.Sapling)
+                {
+                    if (!Chance(1 / 30f)) continue;
+                    Terrain[i] = Simulation.Terrain.Forest;
+                    MarkChanged(i);
+                }
+                else if (t == Simulation.Terrain.Stumps && Building[i] == Catalog.None)
+                {
+                    int x = i % Width, y = i / Width;
+                    bool seeds = false;
+                    for (int d = 0; d < 4 && !seeds; d++)
+                        seeds = InBounds(x + DX[d], y + DY[d]) && IsTree(Terrain[Index(x + DX[d], y + DY[d])]);
+                    if (!seeds || !Chance(1 / 30f)) continue;
+                    Terrain[i] = Simulation.Terrain.Sapling;
+                    MarkChanged(i);
+                }
+            }
         }
 
         // ---------------------------------------------------------------- networks
@@ -568,6 +771,7 @@ namespace Horizonte.Simulation
                 var t = Terrain[i];
                 if (t == Simulation.Terrain.Water) Stamp(i % Width, i / Width, 1, 1, 3, 15);
                 else if (t == Simulation.Terrain.Forest) Stamp(i % Width, i / Width, 1, 1, 2, 6);
+                else if (t == Simulation.Terrain.Mountain) Stamp(i % Width, i / Width, 1, 1, 3, 4);
                 if (Anchor[i] != i) continue;
                 var def = DefAt(i);
                 if (def == null || def.Desirability == 0 || def.DesireRadius == 0) continue;
@@ -670,7 +874,7 @@ namespace Horizonte.Simulation
 
         // ---------------------------------------------------------------- time
 
-        /// <summary>Advances one day.</summary>
+        /// <summary>Advances one tick (five game minutes).</summary>
         public void Step()
         {
             UpdateStats();
@@ -679,12 +883,25 @@ namespace Horizonte.Simulation
             AdvanceConstruction();
             UpdateNetworks();
             UpdateStats();
-            Day++;
-            if (Day % DaysPerMonth == 0)
+            Tick++;
+            FinishSawmillJobs();
+            if (Tick % TicksPerHour == 0)
+            {
+                Regrow();
+                RunSawmills();
+                HourPassed?.Invoke();
+            }
+            if (Tick % TicksPerDay == BudgetTick)
             {
                 RunBudget();
-                MonthPassed?.Invoke();
+                DayPassed?.Invoke();
             }
+        }
+
+        /// <summary>Runs whole days at once (tests and showcases).</summary>
+        public void StepDays(int days)
+        {
+            for (int k = 0; k < days * TicksPerDay; k++) Step();
         }
 
         void UpdateStats()
@@ -762,7 +979,10 @@ namespace Horizonte.Simulation
 
         static float Clamp(float v) => v < -1 ? -1 : v > 1 ? 1 : v;
 
-        /// <summary>Homes that work fill up while people want to move in, and empty out when they do not.</summary>
+        /// <summary>
+        /// Homes that work fill up while people want to move in, and empty out when they do not. The rates are per tick and
+        /// keep the pace of the old clock, which stepped every two fifths as often.
+        /// </summary>
         void MoveResidents()
         {
             for (int i = 0; i < Building.Length; i++)
@@ -773,17 +993,17 @@ namespace Horizonte.Simulation
                 int now = Occupants[i], cap = def.Residents;
                 if (!Working(i))
                 {
-                    if (now > 0 && Chance(.3f)) Occupants[i] = Math.Max(0, now - Math.Max(1, cap / 20));
+                    if (now > 0 && Chance(.59f)) Occupants[i] = Math.Max(0, now - Math.Max(1, cap / 20));
                     continue;
                 }
                 double mood = Math.Max(0, Math.Min(1.2, HomeSatisfaction(i) / 100));
                 if (DemandResidential > 0 && now < cap)
                 {
-                    double expected = cap * .03 * DemandResidential * (.4 + mood);
+                    double expected = cap * .075 * DemandResidential * (.4 + mood);
                     int arrive = (int)expected + (Chance((float)(expected - Math.Floor(expected))) ? 1 : 0);
                     Occupants[i] = Math.Min(cap, now + arrive);
                 }
-                else if (now > 0 && (DemandResidential < -.3f || mood < .25) && Chance(.2f))
+                else if (now > 0 && (DemandResidential < -.3f || mood < .25) && Chance(.43f))
                 {
                     Occupants[i] = Math.Max(0, now - Math.Max(1, cap / 25));
                 }
@@ -815,9 +1035,10 @@ namespace Horizonte.Simulation
 
         void RunBudget()
         {
-            // Residents and workers pay; every open shop, office and factory pays for the jobs it offers.
-            int residents = (int)Math.Round((Population + Employed) * TaxRate / 4.0);
-            int business = (int)Math.Round(Jobs * TaxRate / 5.0);
+            // Residents and workers pay; every open shop, office and factory pays for the jobs it offers. A day lasts as long
+            // as 24 months of the old clock, so the rates are 24 times those.
+            int residents = (Population + Employed) * TaxRate * 6;
+            int business = (int)Math.Round(Jobs * TaxRate * 4.8);
             int upkeep = 0;
             for (int i = 0; i < Building.Length; i++)
             {
@@ -839,13 +1060,13 @@ namespace Horizonte.Simulation
         /// <summary>Whether the bank will lend another <see cref="LoanAmount"/>.</summary>
         public bool CanBorrow => LoanBalance + LoanAmount * 11 / 10 <= (long)LoanAmount * 11 / 10 * MaxLoans;
 
-        /// <summary>Borrows <see cref="LoanAmount"/> now, to be paid back with 10 % interest over <see cref="LoanMonths"/> months.</summary>
+        /// <summary>Borrows <see cref="LoanAmount"/> now, to be paid back with 10 % interest over <see cref="LoanDays"/> days.</summary>
         public bool TakeLoan()
         {
             if (!CanBorrow) return false;
             Money += LoanAmount;
             LoanBalance += LoanAmount * 11 / 10;
-            LoanPayment = (int)Math.Ceiling(LoanBalance / (double)LoanMonths);
+            LoanPayment = (int)Math.Ceiling(LoanBalance / (double)LoanDays);
             return true;
         }
 

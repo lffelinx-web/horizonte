@@ -41,6 +41,10 @@ namespace Horizonte.Presentation
             new Entry("Yard", "#86AE60", .05f),
             new Entry("Trunk", "#6B4A32", .05f),
             new Entry("Leaves", "#4C7A3A", .1f),
+            new Entry("LeavesLight", "#6A9445", .1f),
+            new Entry("Field", "#A6A861", .05f),
+            new Entry("FieldRow", "#7B7F41", .05f),
+            new Entry("StumpCut", "#D8B47C", .1f),
             new Entry("StreetLamp", "#4A4F57", .4f, .5f),
             new Entry("LampGlow", "#FFF1C9", .6f),
             new Entry("WallResidential", "#EDE3D1", .1f),
@@ -121,6 +125,13 @@ namespace Horizonte.Presentation
                 m.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
                 m.SetOverrideTag("RenderType", "Transparent");
                 m.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            }
+            // Street lamps and windows light up at night (DayNight); keeping the keyword on keeps that shader in the build.
+            if (e.Name == "LampGlow" || e.Name == "Glass")
+            {
+                m.EnableKeyword("_EMISSION");
+                m.SetColor("_EmissionColor", Color.black);
+                m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
             }
             m.enableInstancing = true;
             return m;
