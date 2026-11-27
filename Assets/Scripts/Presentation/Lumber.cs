@@ -25,6 +25,8 @@ namespace Horizonte.Presentation
             public State State;
             public float Timer, Phase;
             public Vector3 Home, Target;
+            /// <summary>Tile centres to pass through before heading for the target: the way round buildings.</summary>
+            public readonly Queue<Vector3> Way = new Queue<Vector3>();
             public List<CityView.TreeSpot> Trees;
         }
 
@@ -112,7 +114,52 @@ namespace Horizonte.Presentation
                 w.Target = Beside(w.Trees[0].At, home);
             }
             else w.Target = Beside(CityView.TileCentre(tile % city.Width, tile / city.Width), home);
+            FindWay(w, home, w.Target);
             workers.Add(w);
+        }
+
+        /// <summary>
+        /// The way from one point to another across the grid, never through a building (streets are fine) nor water or
+        /// mountain, as tile centres to pass. Diagonal steps only where both neighbouring tiles are open.
+        /// </summary>
+        void FindWay(Worker w, Vector3 from, Vector3 to)
+        {
+            w.Way.Clear();
+            int W = city.Width;
+            int Tile(Vector3 p) => city.Index(Mathf.Clamp(Mathf.FloorToInt(p.x / CityView.TileSize), 0, W - 1), Mathf.Clamp(Mathf.FloorToInt(p.z / CityView.TileSize), 0, city.Height - 1));
+            int start = Tile(from), goal = Tile(to);
+            if (start == goal) return;
+            bool Open(int x, int y)
+            {
+                if (!city.InBounds(x, y)) return false;
+                int i = city.Index(x, y);
+                if (i == start || i == goal) return true;
+                var terrain = city.Terrain[i];
+                if (terrain == Simulation.Terrain.Water || terrain == Simulation.Terrain.Mountain) return false;
+                return city.Building[i] == Catalog.None || city.IsRoad(x, y) || city.Anchor[i] == w.Station;
+            }
+            var previous = new Dictionary<int, int> { [start] = -1 };
+            var open = new Queue<int>();
+            open.Enqueue(start);
+            while (open.Count > 0 && !previous.ContainsKey(goal))
+            {
+                int i = open.Dequeue(), x = i % W, y = i / W;
+                for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    if (dx == 0 && dy == 0 || !Open(x + dx, y + dy)) continue;
+                    if (dx != 0 && dy != 0 && (!Open(x + dx, y) || !Open(x, y + dy))) continue;
+                    int j = city.Index(x + dx, y + dy);
+                    if (previous.ContainsKey(j)) continue;
+                    previous[j] = i;
+                    open.Enqueue(j);
+                }
+            }
+            if (!previous.ContainsKey(goal)) return;
+            var path = new List<int>();
+            for (int k = previous[goal]; k >= 0 && k != start; k = previous[k]) path.Add(k);
+            path.Reverse();
+            foreach (int k in path) w.Way.Enqueue(CityView.TileCentre(k % W, k / W));
         }
 
         /// <summary>Where to stand to chop a tree: just beside it, on the side he comes from.</summary>
@@ -185,6 +232,7 @@ namespace Horizonte.Presentation
                         view.EndFelling(w.Tile);
                     }
                     w.State = State.Back;
+                    FindWay(w, t.position, w.Home);
                     Figures.Carry(w.Go, true);
                     break;
                 case State.Back:
@@ -211,6 +259,10 @@ namespace Horizonte.Presentation
         bool Walk(Worker w, Vector3 to, float dt)
         {
             var t = w.Go.transform;
+            // Round the buildings first, then straight to the target.
+            while (w.Way.Count > 0 && (t.position - w.Way.Peek()).sqrMagnitude < .04f) w.Way.Dequeue();
+            bool last = w.Way.Count == 0;
+            if (!last) to = w.Way.Peek();
             var p = Vector3.MoveTowards(t.position, to, Speed * dt);
             var heading = to - t.position;
             heading.y = 0;
@@ -218,7 +270,7 @@ namespace Horizonte.Presentation
             t.position = p;
             w.Phase += dt * 8;
             Figures.Bob(w.Go, w.Phase);
-            return (p - to).sqrMagnitude < .01f;
+            return last && (p - to).sqrMagnitude < .01f;
         }
 
         /// <summary>An orange frame on the ground and a flag on every tile waiting to be felled or being felled.</summary>

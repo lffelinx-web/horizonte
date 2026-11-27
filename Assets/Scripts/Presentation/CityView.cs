@@ -64,15 +64,16 @@ namespace Horizonte.Presentation
 
         MeshFilter gridFilter;
         readonly MeshBuilder gridMesh = new MeshBuilder(2);
-        bool gridVisible;
+        bool gridVisible, gridForest;
 
         /// <summary>
         /// While building, faint lines mark the free tiles near the streets, and the tiles that touch a street (where
         /// buildings can go) get a soft tint, so it is easy to see how much room there is.
         /// </summary>
-        public void ShowGrid(bool visible)
+        public void ShowGrid(bool visible, bool forest = false)
         {
             gridVisible = visible;
+            gridForest = forest;
             if (visible) RebuildGrid();
             else if (gridFilter != null) gridFilter.gameObject.SetActive(false);
         }
@@ -93,10 +94,35 @@ namespace Horizonte.Presentation
             gridMesh.Clear();
             const int near = 4;
             const float line = .09f, inset = .06f, y = .1f;
+            var stations = gridForest ? city.Stations() : null;
+            void GridTile(int gx, int gy, bool tint)
+            {
+                float gx0 = gx * TileSize + inset, gz0 = gy * TileSize + inset, gx1 = (gx + 1) * TileSize - inset, gz1 = (gy + 1) * TileSize - inset;
+                gridMesh.Flat(0, gx0, gz0, gx1, gz0 + line, y);
+                gridMesh.Flat(0, gx0, gz1 - line, gx1, gz1, y);
+                gridMesh.Flat(0, gx0, gz0 + line, gx0 + line, gz1 - line, y);
+                gridMesh.Flat(0, gx1 - line, gz0 + line, gx1, gz1 - line, y);
+                if (tint) gridMesh.Flat(1, gx0 + .5f, gz0 + .5f, gx1 - .5f, gz1 - .5f, y - .02f);
+            }
             for (int ty = 0; ty < city.Height; ty++)
             for (int tx = 0; tx < city.Width; tx++)
             {
                 int i = city.Index(tx, ty);
+                if (gridForest && stations.Count > 0)
+                {
+                    // Felling: the forest tiles, tinted where a logging camp reaches.
+                    if (city.Terrain[i] != Simulation.Terrain.Forest) continue;
+                    bool reach = false;
+                    foreach (int s in stations)
+                    {
+                        var (sw, sh) = city.Size(s);
+                        float dx = tx + .5f - (s % city.Width + sw * .5f), dy = ty + .5f - (s / city.Width + sh * .5f);
+                        reach |= dx * dx + dy * dy <= city.DefAt(s).LumberReach * city.DefAt(s).LumberReach;
+                    }
+                    if (!reach) continue;
+                    GridTile(tx, ty, reach);
+                    continue;
+                }
                 if (city.Building[i] != Catalog.None || city.Terrain[i] == Simulation.Terrain.Water) continue;
                 bool roadNear = false;
                 for (int dy = -near; dy <= near && !roadNear; dy++)
@@ -166,6 +192,8 @@ namespace Horizonte.Presentation
             chunkNear = new Mesh[chunkFilters.Length];
             chunkFar = new Mesh[chunkFilters.Length];
             felling.Clear();
+            warnings.Clear();
+            layerFilter = null;
             var mats = Palette.Get(GroundMaterials);
             for (int i = 0; i < chunkFilters.Length; i++)
             {
@@ -291,6 +319,9 @@ namespace Horizonte.Presentation
         {
             if (chunkFilters == null) return;
             for (int c = 0; c < chunkFilters.Length; c++) ChooseDetail(c);
+            // Warning icons face the camera.
+            var cam = Camera.main;
+            if (cam != null) foreach (var w in warnings.Values) if (w != null) w.transform.rotation = cam.transform.rotation;
         }
 
         void BuildTile(int x, int y)
@@ -420,6 +451,20 @@ namespace Horizonte.Presentation
             int step = northSouth ? y : x;
             // Lamp on one sidewalk, tree on the opposite one, swapping every tile.
             bool lamp = (step & 1) == 0;
+            // Power poles with their cables along the same sidewalk as the lamps: the grid runs along the streets.
+            if (!low)
+            {
+                var along = northSouth ? Vector3.forward : Vector3.right;
+                var across = northSouth ? Vector3.right : Vector3.forward;
+                var pole = new Vector3(x0, h, z0) + (northSouth ? new Vector3(side - .35f, 0, 1.2f) : new Vector3(1.2f, 0, side - .35f));
+                builder.Box(STrunk, pole, new Vector3(.22f, 7.4f, .22f));
+                builder.Box(STrunk, pole + Vector3.up * 7f, across * 1.5f + along * .14f + Vector3.up * .12f);
+                foreach (float o in new[] { -.6f, .6f })
+                {
+                    var start = new Vector3(x0, h, z0) + (northSouth ? new Vector3(side - .35f + o, 7.1f, 0) : new Vector3(0, 7.1f, side - .35f + o));
+                    builder.Box(SLamp, start + along * TileSize * .5f, along * TileSize + across * .035f + Vector3.up * .035f);
+                }
+            }
             if (northSouth)
             {
                 if (lamp) Lamp(new Vector3(x0 + side, h, z0 + mid), Vector3.right);
@@ -667,6 +712,209 @@ namespace Horizonte.Presentation
             go.transform.localPosition = new Vector3((x + w * .5f) * TileSize, .05f, (y + h * .5f) * TileSize);
             buildings[i] = go;
             if (city.Construction[i] > 0) sites[i] = ConstructionSite.Create(buildingRoot, go, Hash(x, y), w * TileSize, h * TileSize, def.Floors);
+            if (layer != Layer.None) Tint(i, go);
+        }
+
+        // ---------------------------------------------------------------- information layers
+
+        public enum Layer { None, Power, Water, Sewage, Waste, Services }
+
+        Layer layer;
+        float layerRefreshAt;
+        MeshFilter layerFilter;
+        readonly MeshBuilder layerMesh = new MeshBuilder(1);
+        MaterialPropertyBlock block;
+        static readonly Color Has = new Color(.45f, 1f, .45f), Lacks = new Color(1f, .38f, .34f), Source = new Color(.45f, .7f, 1f), Partly = new Color(1f, .85f, .35f), Neutral = new Color(.62f, .62f, .66f);
+
+        public Layer CurrentLayer => layer;
+
+        /// <summary>
+        /// Shows the city by one service: buildings turn green where they have it, red where they lack it and blue where
+        /// it comes from; the streets carrying the network get a coloured line.
+        /// </summary>
+        public void ShowLayer(Layer l)
+        {
+            layer = l;
+            RefreshLayer();
+        }
+
+        void Update()
+        {
+            if (layer != Layer.None && Time.unscaledTime >= layerRefreshAt) RefreshLayer();
+            if (Time.unscaledTime >= warningsAt) RefreshWarnings();
+        }
+
+        // ---------------------------------------------------------------- warning icons
+
+        /// <summary>Icons floating over buildings that lack something: a street, power, or water once the city needs it.</summary>
+        readonly Dictionary<int, GameObject> warnings = new Dictionary<int, GameObject>();
+        readonly Dictionary<string, Material> warningLooks = new Dictionary<string, Material>();
+        static Mesh quad;
+        float warningsAt;
+
+        void RefreshWarnings()
+        {
+            warningsAt = Time.unscaledTime + .7f;
+            var cam = Camera.main;
+            bool show = layer == Layer.None && cam != null;
+            var wanted = new Dictionary<int, string>();
+            if (show)
+                foreach (var kv in buildings)
+                {
+                    int a = kv.Key;
+                    var def = city.DefAt(a);
+                    if (def == null || city.Construction[a] > 0 || kv.Value == null || !kv.Value.activeInHierarchy) continue;
+                    string icon = null;
+                    if (!city.Served[a] && !def.Standalone) icon = "road";
+                    else if (def.PowerUse > 0 && def.PowerSupply <= 0 && !city.Powered[a]) icon = "bolt";
+                    else if (def.Kind == Kind.Housing && city.Population >= Catalog.ServiceThreshold(Service.Water) && !city.Covered(a, Service.Water)) icon = "water";
+                    if (icon != null) wanted[a] = icon;
+                }
+            var gone = new List<int>();
+            foreach (var kv in warnings)
+                if (!wanted.TryGetValue(kv.Key, out var icon) || kv.Value.name != icon) gone.Add(kv.Key);
+            foreach (int a in gone)
+            {
+                Destroy(warnings[a]);
+                warnings.Remove(a);
+            }
+            foreach (var kv in wanted)
+            {
+                if (warnings.ContainsKey(kv.Key)) continue;
+                var b = buildings[kv.Key];
+                var bounds = new Bounds(b.transform.position, Vector3.zero);
+                foreach (var r in b.GetComponentsInChildren<Renderer>()) bounds.Encapsulate(r.bounds);
+                warnings[kv.Key] = Warning(kv.Value, new Vector3(bounds.center.x, bounds.max.y + 3, bounds.center.z));
+            }
+        }
+
+        GameObject Warning(string icon, Vector3 at)
+        {
+            if (quad == null)
+            {
+                quad = new Mesh { name = "Aviso" };
+                quad.SetVertices(new[] { new Vector3(-.5f, -.5f, 0), new Vector3(.5f, -.5f, 0), new Vector3(.5f, .5f, 0), new Vector3(-.5f, .5f, 0) });
+                quad.SetUVs(0, new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) });
+                quad.SetTriangles(new[] { 0, 3, 2, 0, 2, 1 }, 0);
+                quad.RecalculateNormals();
+                quad.RecalculateBounds();
+            }
+            var go = new GameObject(icon);
+            go.transform.SetParent(transform, false);
+            go.transform.position = at;
+            go.transform.localScale = Vector3.one * 4.5f;
+            Part(go.transform, "Fondo", WarningLook("circulo"), 0);
+            Part(go.transform, "Icono", WarningLook(icon), -.01f).localScale = Vector3.one * .62f;
+            return go;
+        }
+
+        static Transform Part(Transform parent, string name, Material material, float z)
+        {
+            var go = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = new Vector3(0, 0, z);
+            go.GetComponent<MeshFilter>().sharedMesh = quad;
+            var mr = go.GetComponent<MeshRenderer>();
+            mr.sharedMaterial = material;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            return go.transform;
+        }
+
+        Material WarningLook(string icon)
+        {
+            if (warningLooks.TryGetValue(icon, out var m)) return m;
+            m = new Material(Palette.Get("Selection")) { name = "Aviso " + icon };
+            var sprite = icon == "circulo" ? UiKit.Circle : Icons.Get(icon);
+            m.SetTexture("_BaseMap", sprite.texture);
+            m.SetColor("_BaseColor", icon == "circulo" ? new Color(.72f, .12f, .1f, .92f) : Color.white);
+            m.renderQueue = 3100;
+            return warningLooks[icon] = m;
+        }
+
+        void RefreshLayer()
+        {
+            layerRefreshAt = Time.unscaledTime + 1;
+            foreach (var kv in buildings) Tint(kv.Key, kv.Value);
+            if (layerFilter == null)
+            {
+                var go = new GameObject("Capa", typeof(MeshFilter), typeof(MeshRenderer));
+                go.transform.SetParent(transform, false);
+                var mr = go.GetComponent<MeshRenderer>();
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                mr.receiveShadows = false;
+                layerFilter = go.GetComponent<MeshFilter>();
+                layerFilter.sharedMesh = new Mesh();
+            }
+            layerMesh.Clear();
+            var service = LayerService(layer);
+            if (layer != Layer.None && layer != Layer.Services)
+            {
+                // The cables or pipes under the streets that are part of a working network.
+                for (int i = 0; i < city.Building.Length; i++)
+                {
+                    int x = i % city.Width, y = i / city.Width;
+                    if (!city.IsRoad(x, y)) continue;
+                    bool live = layer == Layer.Power ? city.PowerCover[i] : city.UtilityReaches(service, city.RoadNetwork(i));
+                    if (!live) continue;
+                    float x0 = x * TileSize, z0 = y * TileSize, m = TileSize * .5f, half = .55f;
+                    for (int d = 0; d < 4; d++)
+                    {
+                        if (!city.IsRoad(x + City.DX[d], y + City.DY[d])) continue;
+                        float ex = x0 + m + City.DX[d] * m, ez = z0 + m + City.DY[d] * m;
+                        layerMesh.Flat(0, Mathf.Min(x0 + m, ex) - half, Mathf.Min(z0 + m, ez) - half, Mathf.Max(x0 + m, ex) + half, Mathf.Max(z0 + m, ez) + half, .09f);
+                    }
+                    layerMesh.Flat(0, x0 + m - half, z0 + m - half, x0 + m + half, z0 + m + half, .09f);
+                }
+            }
+            layerFilter.sharedMesh = layerMesh.ToMesh(layerFilter.sharedMesh);
+            var colour = layer == Layer.Power ? new Color(1f, .85f, .2f, .9f) : layer == Layer.Water ? new Color(.3f, .7f, 1f, .9f) : layer == Layer.Sewage ? new Color(.7f, .5f, .3f, .9f) : new Color(.5f, .85f, .4f, .9f);
+            var mat = layerFilter.GetComponent<MeshRenderer>().sharedMaterial;
+            if (mat == null) layerFilter.GetComponent<MeshRenderer>().sharedMaterial = mat = new Material(Palette.Get("Selection")) { name = "Capa" };
+            mat.SetColor("_BaseColor", colour);
+            layerFilter.gameObject.SetActive(layer != Layer.None);
+        }
+
+        static Service LayerService(Layer l) => l == Layer.Water ? Service.Water : l == Layer.Sewage ? Service.Sewage : l == Layer.Waste ? Service.Waste : Service.None;
+
+        void Tint(int anchor, GameObject go)
+        {
+            if (block == null) block = new MaterialPropertyBlock();
+            bool off = layer == Layer.None;
+            if (!off) block.SetColor("_BaseColor", StateColour(anchor));
+            foreach (var r in go.GetComponentsInChildren<MeshRenderer>(true)) r.SetPropertyBlock(off ? null : block);
+        }
+
+        /// <summary>Colour of a building in the current layer.</summary>
+        Color StateColour(int a)
+        {
+            var def = city.DefAt(a);
+            if (def == null) return Neutral;
+            switch (layer)
+            {
+                case Layer.Power:
+                    if (def.PowerSupply > 0) return Source;
+                    if (def.PowerUse <= 0) return Neutral;
+                    return city.Powered[a] ? Has : Lacks;
+                case Layer.Water:
+                case Layer.Sewage:
+                case Layer.Waste:
+                    var s = LayerService(layer);
+                    if (def.Service == s) return Source;
+                    if (Catalog.Use(def, s, city.Occupants[a]) <= 0) return Neutral;
+                    return city.Covered(a, s) ? Has : Lacks;
+                default:
+                    if (def.Kind == Kind.Service && def.Service != Service.None && !Catalog.IsUtility(def.Service)) return Source;
+                    if (def.Kind != Kind.Housing) return Neutral;
+                    int needed = 0, have = 0;
+                    foreach (var service in Catalog.Services)
+                    {
+                        if (Catalog.IsUtility(service) || city.Population < Catalog.ServiceThreshold(service)) continue;
+                        needed++;
+                        if (city.Covered(a, service)) have++;
+                    }
+                    return needed == 0 || have == needed ? Has : have > 0 ? Partly : Lacks;
+            }
         }
     }
 }

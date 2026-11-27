@@ -23,8 +23,6 @@ namespace Horizonte.Presentation
             // From the end of the highway out of the tunnel to the town.
             Road(city, City.Line(CityGenerator.EntranceEnd(city.Width), cy, cx - 18, cy));
             Try(city, "central_termoelectrica", cx - 22, cy - 9);
-            Try(city, "subestacion", cx - 11, cy - 4);
-            Try(city, "subestacion", cx - 7, cy + 4);
 
             // Industry to the south, then shops, then homes; services spread among them.
             Try(city, "granja_agricola", cx - 17, cy - 9);

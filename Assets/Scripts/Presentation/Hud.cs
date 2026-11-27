@@ -20,7 +20,7 @@ namespace Horizonte.Presentation
         /// <summary>Whole number with spaces between thousands, as written in Spanish.</summary>
         public static string N(long v) => v.ToString("#,0", Numbers);
 
-        enum Popup { None, Finance, Alerts, Help, Settings, Wood }
+        enum Popup { None, Finance, Alerts, Help, Settings, Wood, Layers }
 
         sealed class Btn
         {
@@ -87,7 +87,9 @@ namespace Horizonte.Presentation
         Image alertBadge;
         Text alertBadgeText;
         readonly List<string> alerts = new List<string>();
-        RectTransform popupPanel, taxRow, loanRow, settingsRow, woodRow;
+        RectTransform popupPanel, taxRow, loanRow, settingsRow, woodRow, layersRow;
+        readonly List<(CityView.Layer layer, Btn button)> layerButtons = new List<(CityView.Layer, Btn)>();
+        Btn layersButton;
         Text popupTitle, popupBody, taxText, loanText;
         Btn loanButton;
         Btn newCityButton;
@@ -371,12 +373,14 @@ namespace Horizonte.Presentation
 
         void BuildLeftColumn()
         {
-            var col = At("Columna", safe, 12, 299, 76, 216);
+            var col = At("Columna", safe, 12, 299, 76, 286);
             Panel(col, UiKit.PanelColor, 18);
             MakeButton(col, "Finanzas", 8, 8, 60, 60, 14, "chart", 32, null, 0, () => TogglePopup(Popup.Finance)).Edge.enabled = false;
             var alertsButton = MakeButton(col, "Avisos", 8, 78, 60, 60, 14, "warning", 32, null, 0, () => TogglePopup(Popup.Alerts));
             alertsButton.Edge.enabled = false;
             MakeButton(col, "Ayuda", 8, 148, 60, 60, 14, "question", 32, null, 0, () => TogglePopup(Popup.Help)).Edge.enabled = false;
+            layersButton = MakeButton(col, "Capas", 8, 218, 60, 60, 14, "layers", 32, null, 0, () => TogglePopup(Popup.Layers));
+            layersButton.Edge.enabled = false;
 
             var badge = At("Contador", alertsButton.Root, 40, -6, 26, 26);
             alertBadge = badge.gameObject.AddComponent<Image>();
@@ -417,6 +421,16 @@ namespace Horizonte.Presentation
             sellSome.Back.color = UiKit.Accent;
             MakeButton(woodRow, "Vender todo", 206, 0, 190, 56, 14, null, 0, "Vender todo", 21, () => SellWood(int.MaxValue));
 
+            layersRow = At("Capas", popupPanel, 22, 0, 396, 56);
+            var layers = new[] { (CityView.Layer.Power, "bolt", UiKit.Warn), (CityView.Layer.Water, "water", new Color(.45f, .75f, 1f)), (CityView.Layer.Sewage, "water", new Color(.75f, .55f, .35f)), (CityView.Layer.Waste, "trash", new Color(.6f, .85f, .55f)), (CityView.Layer.Services, "cross", new Color(1f, .6f, .6f)) };
+            for (int k = 0; k < layers.Length; k++)
+            {
+                var (l, icon, tint) = layers[k];
+                var b = MakeButton(layersRow, l.ToString(), k * 80.5f, 0, 74, 56, 12, icon, 30, null, 0, () => SetLayer(l));
+                b.Icon.color = tint;
+                layerButtons.Add((l, b));
+            }
+
             settingsRow = At("Opciones", popupPanel, 22, 0, 396, 56);
             newCityButton = MakeButton(settingsRow, "Nueva ciudad", 0, 0, 396, 56, 14, null, 0, "Empezar una ciudad nueva", 22, NewCity);
             newCityButton.Back.color = new Color(.45f, .14f, .13f, .95f);
@@ -452,6 +466,7 @@ namespace Horizonte.Presentation
             taxRow.gameObject.SetActive(popup == Popup.Finance);
             loanRow.gameObject.SetActive(popup == Popup.Finance);
             woodRow.gameObject.SetActive(popup == Popup.Wood);
+            layersRow.gameObject.SetActive(popup == Popup.Layers);
             settingsRow.gameObject.SetActive(popup == Popup.Settings);
             switch (popup)
             {
@@ -478,6 +493,11 @@ namespace Horizonte.Presentation
                             ? "<color=#A9BCE0>Pon un <b>puesto de tala temporal</b> cerca de los árboles (Industria) y marca árboles con <b>Talar</b>. Fuera de la reserva los árboles no vuelven a crecer.</color>"
                             : $"<color=#A9BCE0>{stations} {(stations == 1 ? "puesto de tala" : "puestos de tala")} y {sawmills} {(sawmills == 1 ? "aserradero" : "aserraderos")} trabajando. Leñadores: {c.Lumberjacks} · casillas en tala: {c.Marked.Count + c.Felling.Count}.</color>");
                     break;
+                case Popup.Layers:
+                    popupTitle.text = "Capas";
+                    popupBody.text = "Mira la ciudad por servicio: <color=#73FF73>verde</color> lo tiene, <color=#FF6157>rojo</color> le falta, <color=#73B3FF>azul</color> es de donde sale. La luz, el agua, el drenaje y la basura llegan por las calles conectadas a sus plantas.\n" + (game.View.CurrentLayer == CityView.Layer.None ? "" : "<color=#A9BCE0>Toca la misma capa para quitarla.</color>");
+                    foreach (var (l, b) in layerButtons) b.Back.color = l == game.View.CurrentLayer ? UiKit.Accent : UiKit.ButtonColor;
+                    break;
                 case Popup.Alerts:
                     popupTitle.text = "Avisos";
                     popupBody.text = alerts.Count == 0 ? "Todo en orden." : "• " + string.Join("\n• ", alerts);
@@ -498,7 +518,7 @@ namespace Horizonte.Presentation
             float bodyHeight = popupBody.preferredHeight;
             popupBody.rectTransform.sizeDelta = new Vector2(396, bodyHeight);
             float y = 58 + bodyHeight + 14;
-            foreach (var extra in new[] { taxRow, loanRow, woodRow, settingsRow })
+            foreach (var extra in new[] { taxRow, loanRow, woodRow, layersRow, settingsRow })
             {
                 if (!extra.gameObject.activeSelf) continue;
                 extra.anchoredPosition = new Vector2(22, -y);
@@ -512,6 +532,15 @@ namespace Horizonte.Presentation
                 float top = Mathf.Clamp(room - (y + 8), 12, 299);
                 popupPanel.anchoredPosition = new Vector2(100, -top);
             }
+        }
+
+        void SetLayer(CityView.Layer l)
+        {
+            if (game.View.CurrentLayer == l) l = CityView.Layer.None;
+            game.View.ShowLayer(l);
+            layersButton.Back.color = l == CityView.Layer.None ? UiKit.ButtonColor : UiKit.Accent;
+            FillPopup();
+            UpdateHint();
         }
 
         void SellWood(int amount)
@@ -572,7 +601,7 @@ namespace Horizonte.Presentation
             }
             if (c.PowerSupply == 0 && consumers > 0) alerts.Add("No hay centrales eléctricas: sin luz nada funciona.");
             else if (c.PowerDemand > c.PowerSupply) alerts.Add($"La energía no alcanza: faltan {N(c.PowerDemand - c.PowerSupply)} MW.");
-            if (outOfReach > 0 && c.PowerSupply > 0) alerts.Add($"{N(outOfReach)} {(outOfReach == 1 ? "edificio queda" : "edificios quedan")} lejos de la red: construye una subestación cerca.");
+            if (outOfReach > 0 && c.PowerSupply > 0) alerts.Add($"{N(outOfReach)} {(outOfReach == 1 ? "edificio queda" : "edificios quedan")} sin calle hasta una central: conecta su calle con la de una central.");
             else if (unpowered > 0 && c.PowerSupply > 0) alerts.Add($"{N(unpowered)} {(unpowered == 1 ? "edificio" : "edificios")} sin electricidad.");
             if (noRoad > 0) alerts.Add($"{N(noRoad)} {(noRoad == 1 ? "edificio" : "edificios")} sin calle conectada a la carretera.");
             foreach (var s in Catalog.Services)
@@ -1037,7 +1066,7 @@ namespace Horizonte.Presentation
                     case Kind.Power:
                         float use = c.PowerSupply > 0 ? c.PowerDemand / (float)c.PowerSupply : 0;
                         if (def.PowerSupply > 0) AddCard("bolt", UiKit.Warn, "Producción", working ? $"{N(def.PowerSupply)} MW" : "0 MW", working ? Color.white : UiKit.Bad);
-                        AddCard("radius", blue, "Alcance de la red", $"{def.PowerReach} casillas", Color.white);
+                        AddCard("road", blue, "Red", "Por las calles", Color.white);
                         AddCard("chart", blue, "Uso de la red", $"{Mathf.RoundToInt(use * 100)} %", use > 1 ? UiKit.Bad : Color.white, use);
                         AddCard("road", blue, "Calle conectada", street, streetColor);
                         AddRow("bolt", UiKit.Warn, "Consumo de la ciudad", $"{N(c.PowerDemand)} MW", Color.white);

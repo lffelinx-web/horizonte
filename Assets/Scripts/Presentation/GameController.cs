@@ -407,6 +407,20 @@ namespace Horizonte.Presentation
                 yield return CloseUp(folder, "captura_edificios.png", i => City.DefAt(i)?.Model == "apartamentos", 110);
                 yield return CloseUp(folder, "captura_servicio.png", i => City.DefAt(i)?.Model == "escuela_primaria", 90);
 
+                // Information layers over the whole town, and the warning icons without them.
+                Rig.Focus = CityView.TileCentre(City.Width / 2 - 9, City.Height / 2);
+                Rig.Yaw = 30;
+                Rig.Distance = 230;
+                foreach (var (l, file) in new[] { (CityView.Layer.None, "captura_avisos"), (CityView.Layer.Power, "captura_capa_luz"), (CityView.Layer.Water, "captura_capa_agua"), (CityView.Layer.Services, "captura_capa_servicios") })
+                {
+                    View.ShowLayer(l);
+                    yield return new WaitForSecondsRealtime(1.5f);
+                    ScreenCapture.CaptureScreenshot(Path.Combine(folder, file + ".png"));
+                    yield return null;
+                    yield return null;
+                }
+                View.ShowLayer(CityView.Layer.None);
+
                 // Pop-up, building menu and a message.
                 SelectTool(Tool.Explore);
                 Hud.Showcase("finanzas");

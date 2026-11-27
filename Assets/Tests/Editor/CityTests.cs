@@ -85,16 +85,34 @@ namespace Horizonte.Tests
         }
 
         [Test]
-        public void PowerReachesOnlyAroundPlantsAndSubstations()
+        public void PowerRunsAlongConnectedStreets()
         {
-            var city = new City(60, 30, 7) { Money = 1_000_000 };
-            city.PlaceMany(Catalog.Road, City.Line(0, 10, 59, 10), out _);
+            var city = new City(60, 30, 7) { Money = 1_000_000, IgnoreRequirements = true };
+            city.PlaceMany(Catalog.Road, City.Line(0, 10, 50, 10), out _);
+            // A separate street, also out to the edge of the map, but not joined to the first.
+            city.PlaceMany(Catalog.Road, City.Line(54, 20, 59, 20), out _);
             city.Place(Id("central_termoelectrica"), 0, 11);
-            city.Place(Id("casa_basica"), 50, 11);
-            Assert.IsFalse(city.Powered[city.Index(50, 11)]);
-            for (int x = 12; x < 50; x += 9) city.Place(Id("subestacion"), x, 11);
+            city.Place(Id("casa_basica"), 49, 11);
+            city.Place(Id("casa_basica"), 56, 21);
             city.FinishConstruction();
-            Assert.IsTrue(city.Powered[city.Index(50, 11)]);
+            Assert.IsTrue(city.Powered[city.Index(49, 11)], "far along the same street");
+            Assert.IsFalse(city.Powered[city.Index(56, 21)], "on a street not joined to the plant");
+            Assert.AreEqual(city.NetworkOf(city.Index(0, 11)), city.NetworkOf(city.Index(49, 11)));
+
+            // Joining the streets brings the light.
+            city.PlaceMany(Catalog.Road, City.Line(50, 10, 54, 20), out _);
+            Assert.IsTrue(city.Powered[city.Index(56, 21)]);
+        }
+
+        [Test]
+        public void ServicesReachAlongTheStreetsOnly()
+        {
+            var city = Flat();
+            city.Place(Id("central_termoelectrica"), 0, 11);
+            city.Place(Id("consultorio"), 6, 8);
+            city.Place(Id("casa_basica"), 18, 11);
+            city.FinishConstruction();
+            Assert.IsFalse(city.Covered(city.Index(18, 11), Service.Health), "eleven steps away, the clinic reaches eight");
         }
 
         [Test]

@@ -2,7 +2,7 @@
 
 Simulador de construcción de ciudades en 3D para iPhone, hecho en Unity 6 (6000.6.7f1) con URP.
 
-Trazas calles y colocas cada edificio junto a ellas: viviendas, comercios, industrias, energía, agua, seguridad, educación, salud, transporte y parques, cada uno con su precio. Las viviendas se llenan de habitantes si tienen calle conectada a la carretera, electricidad y empleos cerca; los servicios cubren un radio y suben la satisfacción. La electricidad llega a un radio alrededor de las centrales, y las subestaciones la llevan más lejos.
+Trazas calles y colocas cada edificio junto a ellas: viviendas, comercios, industrias, energía, agua, seguridad, educación, salud, transporte y parques, cada uno con su precio. Las viviendas se llenan de habitantes si tienen calle conectada a la carretera, electricidad y empleos cerca; la electricidad, el agua, el drenaje y la basura viajan por las calles conectadas a sus plantas, y los servicios (salud, escuelas, policía, bomberos) llegan hasta cierta distancia caminando por la calle.
 
 Un día dura 8 minutos, con amanecer, atardecer y noche; los impuestos y el mantenimiento se cobran cada día a las 6:00, y las obras tardan horas (unas 3 una casa, 8 una torre). El mapa tiene montañas al noroeste, el río, una reserva forestal cercada al noreste, tierras fértiles al sureste y una carretera que lo cruza. Las casas y algunos edificios usan madera: una caseta forestal en la entrada de la reserva manda a su leñador a talar los árboles que marques con **Talar**, y el aserradero tala solo; los árboles vuelven a crecer.
 
@@ -25,7 +25,7 @@ Una casilla mide **10 × 10 m**. Cada edificio del juego tiene un nombre de arch
 | Vivienda | `casa_basica`, `casa_ampliada`, `duplex`, `apartamentos`, `conjunto_residencial`, `torre_residencial` |
 | Comercio | `tienda_abarrotes`, `mercado_municipal`, `supermercado`, `restaurante`, `centro_comercial`, `edificio_oficinas`, `torre_corporativa`, `centro_financiero` |
 | Industria | `caseta_forestal`, `granja_agricola`, `procesadora_alimentos`, `aserradero`, `fabrica_materiales`, `planta_metalurgica`, `fabrica_bienes`, `planta_electronica`, `industria_automatizada` |
-| Energía | `central_termoelectrica`, `subestacion`, `planta_solar`, `parque_eolico`, `central_hidroelectrica`, `sistema_baterias`, `central_nuclear`, `red_inteligente` |
+| Energía | `central_termoelectrica`, `planta_solar`, `parque_eolico`, `central_hidroelectrica`, `sistema_baterias`, `central_nuclear`, `red_inteligente` |
 | Agua y residuos | `estacion_bombeo`, `planta_potabilizadora`, `tanque_agua`, `control_alcantarillado`, `planta_tratamiento`, `recoleccion_basura`, `planta_reciclaje`, `valorizacion_energetica` |
 | Seguridad y gobierno | `puesto_policia`, `comisaria`, `estacion_bomberos`, `proteccion_civil`, `central_emergencias`, `gestion_riesgos`, `ayuntamiento`, `centro_administrativo` |
 | Educación | `guarderia`, `escuela_primaria`, `escuela_secundaria`, `instituto_tecnico`, `universidad`, `biblioteca`, `centro_investigacion` |

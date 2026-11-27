@@ -266,6 +266,11 @@ namespace Horizonte.Presentation
                 case "water":
                     p.Poly(.5f, .94f, .2f, .46f, .8f, .46f).Circle(.5f, .38f, .3f);
                     break;
+                case "layers":
+                    p.Poly(.5f, .36f, .94f, .56f, .5f, .76f, .06f, .56f);
+                    p.Poly(new[] { .5f, .42f, .82f, .56f, .5f, .7f, .18f, .56f }, true);
+                    p.Poly(.5f, .58f, .94f, .38f, .5f, .18f, .06f, .38f);
+                    break;
                 case "axe":
                     p.Line(.22f, .1f, .66f, .82f, .09f);
                     p.Poly(.5f, .7f, .7f, .94f, .94f, .74f, .78f, .52f);

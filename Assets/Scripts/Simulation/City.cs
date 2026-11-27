@@ -661,9 +661,135 @@ namespace Horizonte.Simulation
                 layer[Index(ax + dx, ay + dy)] = value;
         }
 
+        // ---------------------------------------------------------------- street networks
+
+        /// <summary>Network of each road tile: streets joined to each other, and through buildings that touch two of them. -1 elsewhere.</summary>
+        int[] roadNet = new int[0];
+        /// <summary>Network of each building, read at its anchor (the network of the streets it touches), or -1.</summary>
+        int[] buildingNet = new int[0];
+        readonly List<int> around = new List<int>();
+
+        /// <summary>Network a building belongs to (the streets around it and everything joined to them), or -1.</summary>
+        public int NetworkOf(int anchor) => anchor >= 0 && anchor < buildingNet.Length ? buildingNet[anchor] : -1;
+
+        /// <summary>Network of a street tile, or -1.</summary>
+        public int RoadNetwork(int i) => i >= 0 && i < roadNet.Length ? roadNet[i] : -1;
+
+        /// <summary>Street tiles touching the footprint of a building.</summary>
+        void RoadsAround(int anchor, List<int> into)
+        {
+            into.Clear();
+            var (w, h) = Size(anchor);
+            int x = anchor % Width, y = anchor / Width;
+            for (int k = 0; k < w; k++) { AddRoad(x + k, y - 1, into); AddRoad(x + k, y + h, into); }
+            for (int k = 0; k < h; k++) { AddRoad(x - 1, y + k, into); AddRoad(x + w, y + k, into); }
+        }
+
+        void AddRoad(int x, int y, List<int> into)
+        {
+            if (IsRoad(x, y)) into.Add(Index(x, y));
+        }
+
         /// <summary>
-        /// Power lines reach a radius around each working plant; substations within reach of the grid pass it on further.
-        /// Buildings under the lines are powered nearest first until the supply runs out.
+        /// Cables and pipes run under the streets: each group of connected streets is a network, and a building that
+        /// touches two groups joins them.
+        /// </summary>
+        void UpdateStreetNetworks()
+        {
+            int n = Width * Height;
+            if (roadNet.Length != n) { roadNet = new int[n]; buildingNet = new int[n]; }
+            for (int i = 0; i < n; i++) { roadNet[i] = -1; buildingNet[i] = -1; }
+            int count = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (roadNet[i] >= 0 || !IsRoad(i % Width, i / Width)) continue;
+                roadNet[i] = count;
+                queue.Clear();
+                queue.Enqueue(i);
+                while (queue.Count > 0)
+                {
+                    int j = queue.Dequeue();
+                    for (int d = 0; d < 4; d++)
+                    {
+                        int nx = j % Width + DX[d], ny = j / Width + DY[d];
+                        if (!IsRoad(nx, ny)) continue;
+                        int k = Index(nx, ny);
+                        if (roadNet[k] >= 0) continue;
+                        roadNet[k] = count;
+                        queue.Enqueue(k);
+                    }
+                }
+                count++;
+            }
+            // Buildings that touch two networks join them.
+            var parent = new int[count];
+            for (int k = 0; k < count; k++) parent[k] = k;
+            int Find(int a)
+            {
+                while (parent[a] != a) a = parent[a] = parent[parent[a]];
+                return a;
+            }
+            for (int i = 0; i < n; i++)
+            {
+                if (Anchor[i] != i || DefAt(i) == null || DefAt(i).IsRoad) continue;
+                RoadsAround(i, around);
+                for (int k = 1; k < around.Count; k++)
+                {
+                    int a = Find(roadNet[around[0]]), b = Find(roadNet[around[k]]);
+                    if (a != b) parent[b] = a;
+                }
+            }
+            for (int i = 0; i < n; i++) if (roadNet[i] >= 0) roadNet[i] = Find(roadNet[i]);
+            for (int i = 0; i < n; i++)
+            {
+                if (Anchor[i] != i || DefAt(i) == null || DefAt(i).IsRoad) continue;
+                RoadsAround(i, around);
+                if (around.Count > 0) buildingNet[i] = roadNet[around[0]];
+            }
+        }
+
+        /// <summary>Steps along the streets from the given street tiles to every street tile (-1 where it cannot reach).</summary>
+        int[] StreetDistance(List<int> sources, int max = int.MaxValue)
+        {
+            var dist = new int[Width * Height];
+            for (int i = 0; i < dist.Length; i++) dist[i] = -1;
+            queue.Clear();
+            foreach (int s in sources)
+            {
+                if (dist[s] == 0) continue;
+                dist[s] = 0;
+                queue.Enqueue(s);
+            }
+            while (queue.Count > 0)
+            {
+                int j = queue.Dequeue();
+                if (dist[j] >= max) continue;
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = j % Width + DX[d], ny = j / Width + DY[d];
+                    if (!IsRoad(nx, ny)) continue;
+                    int k = Index(nx, ny);
+                    if (dist[k] >= 0) continue;
+                    dist[k] = dist[j] + 1;
+                    queue.Enqueue(k);
+                }
+            }
+            return dist;
+        }
+
+        /// <summary>Distance along the streets from a building to the nearest street reached, or -1.</summary>
+        int BuildingDistance(int anchor, int[] dist)
+        {
+            RoadsAround(anchor, around);
+            int best = -1;
+            foreach (int r in around)
+                if (dist[r] >= 0 && (best < 0 || dist[r] < best)) best = dist[r];
+            return best;
+        }
+
+        /// <summary>
+        /// Power runs along the streets: the plants feed the buildings of their network, nearest first along the streets,
+        /// until the supply runs out. A network without a plant has no power.
         /// </summary>
         void UpdatePower()
         {
@@ -671,74 +797,66 @@ namespace Horizonte.Simulation
             var wasPowered = (bool[])Powered.Clone();
             Array.Clear(Powered, 0, n);
             Array.Clear(PowerCover, 0, n);
+            UpdateStreetNetworks();
 
-            var nodes = new List<int>();
+            var supplyOf = new Dictionary<int, int>();
+            var sources = new List<int>();
+            int supply = 0;
             for (int i = 0; i < n; i++)
             {
                 if (Anchor[i] != i || !Served[i] || Construction[i] > 0) continue;
-                if (DefAt(i).PowerReach > 0) nodes.Add(i);
+                var def = DefAt(i);
+                if (def.PowerSupply <= 0 || buildingNet[i] < 0) continue;
+                supply += def.PowerSupply;
+                supplyOf[buildingNet[i]] = (supplyOf.TryGetValue(buildingNet[i], out int s) ? s : 0) + def.PowerSupply;
+                Fill(i, Powered, true);
+                RoadsAround(i, around);
+                sources.AddRange(around);
             }
-            // Generators are live; substations join when the grid reaches them.
-            var live = new bool[nodes.Count];
-            var frontier = new Queue<int>();
-            int supply = 0;
-            for (int k = 0; k < nodes.Count; k++)
-            {
-                if (DefAt(nodes[k]).PowerSupply <= 0) continue;
-                live[k] = true;
-                frontier.Enqueue(k);
-                supply += DefAt(nodes[k]).PowerSupply;
-            }
-            while (frontier.Count > 0)
-            {
-                int a = frontier.Dequeue();
-                for (int b = 0; b < nodes.Count; b++)
-                {
-                    if (live[b]) continue;
-                    if (Distance(nodes[a], nodes[b]) > Math.Max(Reach(nodes[a]), Reach(nodes[b]))) continue;
-                    live[b] = true;
-                    frontier.Enqueue(b);
-                }
-            }
-            var liveNodes = new List<int>();
-            for (int k = 0; k < nodes.Count; k++)
-            {
-                if (!live[k]) continue;
-                liveNodes.Add(nodes[k]);
-                Fill(nodes[k], Powered, true);
-                StampCircle(nodes[k], Reach(nodes[k]), i => PowerCover[i] = true);
-            }
+            var dist = StreetDistance(sources);
 
-            // Consumers under the lines, nearest first.
-            var consumers = new List<(float d, int anchor)>();
+            var consumers = new List<(int d, int anchor)>();
             int demand = 0;
             for (int i = 0; i < n; i++)
             {
                 if (Anchor[i] != i || !Served[i] || Construction[i] > 0) continue;
                 var def = DefAt(i);
-                if (def.PowerReach > 0 || def.PowerUse <= 0) continue;
+                if (def.PowerSupply > 0 || def.PowerUse <= 0) continue;
                 demand += def.PowerUse;
-                if (!Any(i, PowerCover)) continue;
-                float best = float.MaxValue;
-                foreach (int node in liveNodes) best = Math.Min(best, Distance(node, i));
-                consumers.Add((best, i));
+                if (buildingNet[i] < 0 || !supplyOf.ContainsKey(buildingNet[i])) continue;
+                int d = BuildingDistance(i, dist);
+                consumers.Add((d < 0 ? int.MaxValue : d, i));
             }
             consumers.Sort((p, q) => p.d.CompareTo(q.d));
-            int remaining = supply;
             foreach (var (_, a) in consumers)
             {
-                int use = DefAt(a).PowerUse;
-                if (use > remaining) continue;
-                remaining -= use;
+                int use = DefAt(a).PowerUse, net = buildingNet[a];
+                if (use > supplyOf[net]) continue;
+                supplyOf[net] -= use;
                 Fill(a, Powered, true);
             }
+
+            // Where the grid reaches: its streets, the buildings on them, and the free tiles beside them.
+            for (int i = 0; i < n; i++)
+            {
+                int net = roadNet[i];
+                if (net < 0 || !supplyOf.ContainsKey(net)) continue;
+                PowerCover[i] = true;
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = i % Width + DX[d], ny = i / Width + DY[d];
+                    if (InBounds(nx, ny)) PowerCover[Index(nx, ny)] = true;
+                }
+            }
+            for (int i = 0; i < n; i++)
+                if (Anchor[i] == i && buildingNet[i] >= 0 && supplyOf.ContainsKey(buildingNet[i])) Fill(i, PowerCover, true);
+
             PowerSupply = supply;
             PowerDemand = demand;
             for (int i = 0; i < n; i++)
                 if (Powered[i] != wasPowered[i] && !IsRoad(i % Width, i / Width)) MarkChanged(i);
         }
 
-        int Reach(int anchor) => DefAt(anchor).PowerReach;
 
         bool Any(int anchor, bool[] layer)
         {
@@ -811,25 +929,46 @@ namespace Horizonte.Simulation
             }
         }
 
-        /// <summary>Working service buildings cover the tiles within their radius.</summary>
+        /// <summary>
+        /// Working service buildings (clinics, schools, police…) reach the buildings within their radius counted in steps
+        /// along the streets, not in a straight line: a school across the river without a bridge does not serve you.
+        /// </summary>
         void UpdateCoverage()
         {
             Array.Clear(Coverage, 0, Coverage.Length);
             int bonus = 0;
+            var anchors = new List<int>();
             for (int i = 0; i < Building.Length; i++)
+                if (Anchor[i] == i && DefAt(i) != null && !DefAt(i).IsRoad) anchors.Add(i);
+            var sources = new List<int>();
+            foreach (int i in anchors)
             {
-                if (Anchor[i] != i || !Working(i)) continue;
+                if (!Working(i)) continue;
                 var def = DefAt(i);
                 bonus += def.CityBonus;
                 if (def.Service == Service.None || def.Radius <= 0 || Catalog.IsUtility(def.Service)) continue;
                 ushort bit = (ushort)(1 << (int)def.Service);
-                StampCircle(i, def.Radius, t => Coverage[t] |= bit);
+                RoadsAround(i, sources);
+                var dist = StreetDistance(new List<int>(sources), def.Radius);
+                foreach (int a in anchors)
+                {
+                    if (a != i && BuildingDistance(a, dist) < 0) continue;
+                    var (w, h) = Size(a);
+                    int ax = a % Width, ay = a / Width;
+                    for (int dy = 0; dy < h; dy++)
+                    for (int dx = 0; dx < w; dx++)
+                        Coverage[Index(ax + dx, ay + dy)] |= bit;
+                }
             }
             foreach (var s in Catalog.Utilities) ShareUtility(s);
             CityBonus = Math.Min(15, bonus);
         }
 
         readonly int[] utilitySupply = new int[16], utilityDemand = new int[16];
+        readonly HashSet<int>[] utilityNets = new HashSet<int>[16];
+
+        /// <summary>Whether a street network has a working water, sewage or waste plant on it.</summary>
+        public bool UtilityReaches(Service s, int network) => network >= 0 && utilityNets[(int)s] != null && utilityNets[(int)s].Contains(network);
 
         /// <summary>Daily capacity of the working water, sewage or waste buildings.</summary>
         public int UtilitySupply(Service s) => utilitySupply[(int)s];
@@ -838,25 +977,27 @@ namespace Horizonte.Simulation
         public int UtilityDemand(Service s) => utilityDemand[(int)s];
 
         /// <summary>
-        /// Like power: pipes and trucks reach a radius around each working plant, and the buildings in reach are served
-        /// nearest first until the capacity runs out.
+        /// Like power: water pipes and sewers run under the streets and rubbish trucks drive along them, so a plant serves
+        /// the buildings of its network, nearest first along the streets, until its capacity runs out.
         /// </summary>
         void ShareUtility(Service s)
         {
             int n = Width * Height;
-            var reach = new bool[n];
-            var providers = new List<int>();
+            var capacityOf = new Dictionary<int, int>();
+            var sources = new List<int>();
             int supply = 0, demand = 0;
             for (int i = 0; i < n; i++)
             {
                 if (Anchor[i] != i || !Working(i)) continue;
                 var def = DefAt(i);
-                if (def.Service != s || def.Capacity <= 0) continue;
-                providers.Add(i);
+                if (def.Service != s || def.Capacity <= 0 || buildingNet[i] < 0) continue;
                 supply += def.Capacity;
-                StampCircle(i, def.Radius, t => reach[t] = true);
+                capacityOf[buildingNet[i]] = (capacityOf.TryGetValue(buildingNet[i], out int c) ? c : 0) + def.Capacity;
+                RoadsAround(i, around);
+                sources.AddRange(around);
             }
-            var consumers = new List<(float d, int anchor, int use)>();
+            var dist = StreetDistance(sources);
+            var consumers = new List<(int d, int anchor, int use)>();
             for (int i = 0; i < n; i++)
             {
                 if (Anchor[i] != i || !Served[i] || Construction[i] > 0) continue;
@@ -864,24 +1005,24 @@ namespace Horizonte.Simulation
                 if (def.IsRoad || def.Service == s) continue;
                 int use = Catalog.Use(def, s, Occupants[i]);
                 demand += use;
-                if (!Any(i, reach)) continue;
-                float best = float.MaxValue;
-                foreach (int p in providers) best = Math.Min(best, Distance(p, i));
-                consumers.Add((best, i, use));
+                if (buildingNet[i] < 0 || !capacityOf.ContainsKey(buildingNet[i])) continue;
+                int d = BuildingDistance(i, dist);
+                consumers.Add((d < 0 ? int.MaxValue : d, i, use));
             }
             consumers.Sort((p, q) => p.d.CompareTo(q.d));
             ushort bit = (ushort)(1 << (int)s);
-            int remaining = supply;
             foreach (var (_, a, use) in consumers)
             {
-                if (use > remaining) continue;
-                remaining -= use;
+                int net = buildingNet[a];
+                if (use > capacityOf[net]) continue;
+                capacityOf[net] -= use;
                 var (cw, ch) = Size(a);
                 int ax = a % Width, ay = a / Width;
                 for (int dy = 0; dy < ch; dy++)
                 for (int dx = 0; dx < cw; dx++)
                     Coverage[Index(ax + dx, ay + dy)] |= bit;
             }
+            utilityNets[(int)s] = new HashSet<int>(capacityOf.Keys);
             utilitySupply[(int)s] = supply;
             utilityDemand[(int)s] = demand;
         }
