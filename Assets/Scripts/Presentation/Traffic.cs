@@ -29,6 +29,8 @@ namespace Horizonte.Presentation
         /// <summary>0 is midnight, .25 six in the morning, .5 noon; it follows the city's clock.</summary>
         public float TimeOfDay { get; private set; } = .3f;
 
+        public enum Trip { In, Parked, Stopped, Waiting, Out }
+
         sealed class Mover
         {
             public GameObject Go;
@@ -40,8 +42,15 @@ namespace Horizonte.Presentation
             public float Age, Leaving = -1, Phase;
             public bool Car, Arriving, Truck;
             public int Home = -1;
-            /// <summary>Traffic lights on the way, by the index of the point in the junction: the junction and whether the car goes north-south.</summary>
-            public readonly Dictionary<int, (int tile, bool northSouth)> Gates = new Dictionary<int, (int, bool)>();
+            /// <summary>Traffic lights on the way, by the index of the first point in the junction: the junction, whether the car goes north-south, the middle of the junction and the way it comes in.</summary>
+            public readonly Dictionary<int, (int tile, bool northSouth, Vector3 centre, Vector3 way)> Gates = new Dictionary<int, (int, bool, Vector3, Vector3)>();
+            public Trip Trip;
+            /// <summary>Car park and bay, or kerb tile and side, where the car is parked; the building it came to.</summary>
+            public int Lot = -1, Bay = -1, KerbTile = -1, KerbSide, Destination = -1;
+            /// <summary>Hour it leaves (parked) or clock time it leaves (stopped); seconds it has been held up.</summary>
+            public float Until, Stuck;
+            /// <summary>The person walking back to the car before it leaves.</summary>
+            public Mover Driver;
             /// <summary>The point this person was already let through the lights toward.</summary>
             public int Cleared = -1;
         }
@@ -63,7 +72,6 @@ namespace Horizonte.Presentation
         readonly Stack<Mover> idleTrucks = new Stack<Mover>();
         /// <summary>Cars and vans on their way to work, home or a delivery.</summary>
         readonly List<Mover> commuters = new List<Mover>();
-        const int MaxCars = 24;
         float carDebt;
         readonly Dictionary<int, Garage> garages = new Dictionary<int, Garage>();
         readonly List<int> nearby = new List<int>();
@@ -85,6 +93,11 @@ namespace Horizonte.Presentation
             walkers.Clear();
             idleWalkers.Clear();
             idleCars.Clear();
+            commuters.Clear();
+            idleTrucks.Clear();
+            bays.Clear();
+            kerb.Clear();
+            TurnedAway = 0;
             garages.Clear();
             nearby.Clear();
             if (carMesh == null) LoadLooks();
@@ -115,17 +128,15 @@ namespace Horizonte.Presentation
                 rescan = .5f;
                 Scan(visible);
             }
+            // Cars live all over town, seen or not, so they never pop up out of nowhere.
+            UpdateCars(dt);
             if (!visible)
             {
                 for (int k = walkers.Count - 1; k >= 0; k--) Release(walkers[k], k);
-                for (int k = commuters.Count - 1; k >= 0; k--) ReleaseCar(k);
                 return;
             }
 
             if (dt > 0) SpawnWalkers(dt);
-            if (dt > 0) SpawnCars(dt);
-            for (int k = commuters.Count - 1; k >= 0; k--)
-                if (!Move(commuters[k], dt) || TooFar(commuters[k].Go.transform.position)) ReleaseCar(k);
             for (int k = walkers.Count - 1; k >= 0; k--)
                 if (!Move(walkers[k], dt) || TooFar(walkers[k].Go.transform.position)) Release(walkers[k], k);
             UpdateGarages(dt);
@@ -333,58 +344,147 @@ namespace Horizonte.Presentation
 
         // ---------------------------------------------------------------- traffic
 
-        /// <summary>
-        /// Cars on the streets in step with the people: a third of those heading out go by car, from home to work in the
-        /// morning and back in the evening; and by day delivery vans come and go from shops and factories.
-        /// </summary>
-        void SpawnCars(float dt)
+
+        /// <summary>Cars at most on the streets and in the car parks of the whole town, and parked at the kerb.</summary>
+        const int MaxCars = 40, StreetLimit = 10;
+        /// <summary>Metres from the middle of a street to a car parked at its kerb.</summary>
+        const float KerbParking = 3.05f;
+
+        /// <summary>Which bays of each car park are taken.</summary>
+        readonly Dictionary<int, Mover[]> bays = new Dictionary<int, Mover[]>();
+        /// <summary>Kerb places taken, by street tile and side.</summary>
+        readonly HashSet<(int tile, int side)> kerb = new HashSet<(int, int)>();
+        readonly List<int> workplaces = new List<int>();
+        readonly List<int> carParks = new List<int>();
+        float carClock, workScan;
+
+        /// <summary>Cars parked at the kerb right now, and drivers who found nowhere to park lately (for the alerts).</summary>
+        public int StreetParked => kerb.Count;
+        public int TurnedAway { get; private set; }
+        float turnedAwayDecay;
+
+        /// <summary>The highway tile at the edge of the map, where the tunnel comes out; -1 if the highway is gone.</summary>
+        int TunnelRoad
         {
-            if (nearby.Count == 0) return;
-            int residents = 0, workplaces = 0;
-            foreach (int i in nearby)
+            get
             {
-                var def = city.DefAt(i);
-                if (def.Kind == Kind.Housing) residents += city.Occupants[i];
-                else if (def.Jobs > 0) workplaces++;
-            }
-            float h = TimeOfDay * 24;
-            float vans = h >= 8 && h < 18 ? workplaces * .012f : 0;
-            carDebt += dt * (residents * OutPerHour() / 20f * .35f + vans);
-            while (carDebt >= 1)
-            {
-                carDebt -= 1;
-                if (commuters.Count >= MaxCars) { carDebt = 0; return; }
-                TrySpawnCar(Next() % 100 < 100 * vans / (vans + residents * OutPerHour() / 20f * .35f + .0001f));
+                int i = city.Index(0, Landscape.HighwayY(city.Height));
+                return city.IsRoad(0, Landscape.HighwayY(city.Height)) ? i : -1;
             }
         }
 
-        void TrySpawnCar(bool van)
-        {
-            bool evening = Evening;
-            int home = van ? -1 : Pick(i => city.DefAt(i).Kind == Kind.Housing ? city.Occupants[i] : 0);
-            int work = Pick(i => i != home && city.DefAt(i).Kind != Kind.Housing && city.DefAt(i).Jobs > 0 ? Mathf.Min(8, 1 + city.DefAt(i).Jobs / 6f) : 0);
-            int from = van ? work : home;
-            if (from < 0 || !Front(from, out int fromRoad, out _)) return;
-            var route = new List<int>();
-            int to = van ? Pick(i => i != from ? 1 : 0) : work;
-            if (to < 0 || !Front(to, out int toRoad, out _) || !Route(fromRoad, toRoad, 60, route) || route.Count < 3)
-                Wander(fromRoad, 10 + (int)(Next() % 8), route);
-            if (route.Count < 2) return;
-            // In the evening the trip runs the other way: from work back home.
-            if (evening && !van) route.Reverse();
+        float TunnelZ => (Landscape.HighwayY(city.Height) + .5f) * CityView.TileSize;
 
+        /// <summary>
+        /// Cars come into town through the tunnel and leave through it: people who work here arrive in the morning, park
+        /// (in a car park near their work if there is room, otherwise at the kerb, otherwise they are dropped off) and walk
+        /// the rest; in the evening they walk back to the car and drive out. By day delivery vans pull up at shops and
+        /// factories for a moment. Nothing appears out of thin air.
+        /// </summary>
+        void UpdateCars(float dt)
+        {
+            carClock += dt;
+            workScan -= Time.deltaTime;
+            if (workScan <= 0)
+            {
+                workScan = 2;
+                workplaces.Clear();
+                carParks.Clear();
+                for (int i = 0; i < city.Building.Length; i++)
+                {
+                    if (city.Anchor[i] != i || !city.Working(i)) continue;
+                    var def = city.DefAt(i);
+                    if (def.Jobs > 0) workplaces.Add(i);
+                    if (def.ParkingSpaces > 0) carParks.Add(i);
+                }
+                // Car parks that were demolished send their cars away.
+                var gone = new List<int>();
+                foreach (var kv in bays) if (!carParks.Contains(kv.Key)) gone.Add(kv.Key);
+                foreach (int lot in gone)
+                {
+                    foreach (var c in bays[lot]) if (c != null) c.Lot = -1;
+                    bays.Remove(lot);
+                }
+            }
+            turnedAwayDecay += dt;
+            if (turnedAwayDecay > 40) { turnedAwayDecay = 0; TurnedAway = Mathf.Max(0, TurnedAway - 1); }
+
+            if (dt > 0 && TunnelRoad >= 0) SpawnCars(dt);
+            for (int k = commuters.Count - 1; k >= 0; k--)
+                if (!Drive(commuters[k], dt)) ReleaseCar(k);
+        }
+
+        void SpawnCars(float dt)
+        {
+            float h = TimeOfDay * 24;
+            // Workers arrive over the morning; vans come by during the working day.
+            float arrivals = h >= 6 && h < 9.5f ? city.Employed * .3f * .1f / 20f : 0;
+            float vans = h >= 8 && h < 18 ? workplaces.Count * .006f : 0;
+            carDebt += dt * (arrivals + vans);
+            while (carDebt >= 1)
+            {
+                carDebt -= 1;
+                if (commuters.Count >= MaxCars || workplaces.Count == 0) { carDebt = 0; return; }
+                bool van = Next() % 1000 < 1000 * vans / (vans + arrivals + .0001f);
+                int to = workplaces[(int)(Next() % (uint)workplaces.Count)];
+                ComeIn(to, van);
+            }
+        }
+
+        Mover TakeCar(bool van)
+        {
             var m = van ? (idleTrucks.Count > 0 ? idleTrucks.Pop() : NewCar(true)) : (idleCars.Count > 0 ? idleCars.Pop() : NewCar());
             m.Points.Clear();
             m.Reverse.Clear();
             m.Gates.Clear();
             m.Cleared = -1;
             m.Home = -1;
-            SetLook(m, Next());
-            AddPath(m, route, Lane, RoadY);
+            m.Lot = -1;
+            m.Bay = -1;
+            m.KerbSide = 0;
+            m.Stuck = 0;
             m.Next = 1;
             m.Age = 0;
             m.Leaving = -1;
             m.Arriving = false;
+            SetLook(m, Next());
+            return m;
+        }
+
+        /// <summary>A car drives out of the tunnel to a building: to a bay of the nearest car park with room, or to the kerb.</summary>
+        void ComeIn(int destination, bool van)
+        {
+            if (!Front(destination, out int road, out int dir)) return;
+            var m = TakeCar(van);
+            m.Destination = destination;
+            var route = new List<int>();
+            int lot = van ? -1 : FreeCarPark(destination, out m.Bay);
+            if (lot >= 0 && Front(lot, out int lotRoad, out _) && Route(TunnelRoad, lotRoad, 70, route))
+            {
+                m.Lot = lot;
+                bays[lot][m.Bay] = m;
+                TunnelIn(m);
+                AddPath(m, route, Lane, RoadY);
+                IntoBay(m, lot, m.Bay);
+            }
+            else if (Route(TunnelRoad, road, 70, route))
+            {
+                TunnelIn(m);
+                AddPath(m, route, Lane, RoadY);
+                // Pull over at the kerb on its side of the street, a little before the door.
+                int a = route.Count > 1 ? Step(route[route.Count - 2], route[route.Count - 1]) : 3;
+                int side = KerbSideOf(a);
+                if (!van && kerb.Count < StreetLimit && kerb.Add((road, side))) m.KerbSide = side;
+                else if (!van) TurnedAway++;
+                m.KerbTile = road;
+                m.Points.Add(Centre(road) + Right(a) * KerbParking - Dir(a) * 1.5f + Vector3.up * RoadY);
+            }
+            else
+            {
+                (m.Truck ? idleTrucks : idleCars).Push(m);
+                return;
+            }
+            m.Trip = Trip.In;
             m.Go.transform.position = m.Points[0];
             m.Go.transform.rotation = Quaternion.LookRotation(m.Points[1] - m.Points[0]);
             m.Go.transform.localScale = Vector3.one;
@@ -392,9 +492,243 @@ namespace Horizonte.Presentation
             commuters.Add(m);
         }
 
+        /// <summary>Which kerb a car on a street going one way pulls over to (its right-hand side), as a sign.</summary>
+        static int KerbSideOf(int dir) => dir;
+
+        /// <summary>The nearest working car park with a free bay, no more than a short walk from the destination.</summary>
+        int FreeCarPark(int destination, out int bay)
+        {
+            bay = -1;
+            int best = -1;
+            float bestDistance = 13 * 13;
+            foreach (int lot in carParks)
+            {
+                var def = city.DefAt(lot);
+                if (!bays.TryGetValue(lot, out var taken)) bays[lot] = taken = new Mover[BuildingFactory.ParkingSpots.Length];
+                int free = -1;
+                for (int k = 0; k < taken.Length && free < 0; k++) if (taken[k] == null) free = k;
+                if (free < 0) continue;
+                float dx = lot % city.Width - destination % city.Width, dy = lot / city.Width - destination / city.Width;
+                float d = dx * dx + dy * dy;
+                if (d >= bestDistance) continue;
+                bestDistance = d;
+                best = lot;
+                bay = free;
+            }
+            return best;
+        }
+
+        /// <summary>World position of a point of a car park given in its own space.</summary>
+        Vector3 InLot(int lot, Vector3 local)
+        {
+            var (w, h) = city.Size(lot);
+            var centre = new Vector3((lot % city.Width + w * .5f) * CityView.TileSize, RoadY + .03f, (lot / city.Width + h * .5f) * CityView.TileSize);
+            return centre + Quaternion.Euler(0, city.Rotation[lot] * 90, 0) * local;
+        }
+
+        /// <summary>From the street in front, through the entrance and along the aisle into the bay.</summary>
+        void IntoBay(Mover m, int lot, int bay)
+        {
+            var (spot, facing) = BuildingFactory.ParkingSpots[bay];
+            m.Points.Add(InLot(lot, new Vector3(0, 0, -10.3f)));
+            m.Points.Add(InLot(lot, new Vector3(0, 0, 0)));
+            m.Points.Add(InLot(lot, new Vector3(spot.x, 0, 0)));
+            m.Points.Add(InLot(lot, spot + facing * .3f));
+        }
+
+        void TunnelIn(Mover m)
+        {
+            float z = TunnelZ - Lane;
+            m.Points.Add(new Vector3(-36, RoadY, z));
+            m.Points.Add(new Vector3(-6, RoadY, z));
+        }
+
+        void TunnelOut(Mover m)
+        {
+            float z = TunnelZ + Lane;
+            m.Points.Add(new Vector3(-6, RoadY, z));
+            m.Points.Add(new Vector3(-36, RoadY, z));
+        }
+
+        /// <summary>Moves a car on its trip; false once it has gone back into the tunnel.</summary>
+        bool Drive(Mover m, float dt)
+        {
+            switch (m.Trip)
+            {
+                case Trip.In:
+                    if (Move(m, dt)) return true;
+                    m.Points.Clear();
+                    if (m.Lot >= 0)
+                    {
+                        m.Trip = Trip.Parked;
+                        // The driver walks from the car park to work, and back in the evening.
+                        m.Until = EveningLeave();
+                        WalkFrom(m.Go.transform.position, m.Lot, m.Destination);
+                    }
+                    else if (m.KerbSide != 0)
+                    {
+                        m.Trip = Trip.Parked;
+                        m.Until = EveningLeave();
+                        WalkFromKerb(m, m.Destination);
+                    }
+                    else
+                    {
+                        // Dropped off, or a delivery: a short stop, then away.
+                        m.Trip = Trip.Stopped;
+                        m.Until = carClock + (m.Truck ? 12 : 4);
+                        if (!m.Truck) WalkFromKerb(m, m.Destination);
+                    }
+                    return true;
+                case Trip.Parked:
+                    if (m.Lot >= 0 && !bays.ContainsKey(m.Lot)) return false;
+                    if (TimeOfDay * 24 < m.Until && TimeOfDay * 24 > 5) return true;
+                    // Time to go home: the driver walks back and they leave together.
+                    m.Trip = Trip.Waiting;
+                    m.Driver = m.Lot >= 0 ? WalkTo(m.Destination, m.Lot, m.Go.transform.position) : null;
+                    return true;
+                case Trip.Stopped:
+                    if (carClock < m.Until) return true;
+                    return GoOut(m);
+                case Trip.Waiting:
+                    if (m.Driver != null && m.Driver.Go.activeSelf && walkers.Contains(m.Driver)) return true;
+                    m.Driver = null;
+                    return GoOut(m);
+                default:
+                    return Move(m, dt);
+            }
+        }
+
+        /// <summary>When a worker heads home: between five and half past seven in the evening.</summary>
+        float EveningLeave() => 17 + Next() % 100 / 40f;
+
+        /// <summary>Back out of the bay (or pull out from the kerb), drive to the tunnel and in.</summary>
+        bool GoOut(Mover m)
+        {
+            int tunnel = TunnelRoad;
+            var route = new List<int>();
+            m.Points.Clear();
+            m.Reverse.Clear();
+            m.Gates.Clear();
+            m.Points.Add(m.Go.transform.position);
+            int start;
+            if (m.Lot >= 0)
+            {
+                var (spot, _) = BuildingFactory.ParkingSpots[m.Bay];
+                m.Points.Add(InLot(m.Lot, new Vector3(spot.x, 0, 0)));
+                m.Reverse.Add(1);
+                m.Points.Add(InLot(m.Lot, Vector3.zero));
+                m.Points.Add(InLot(m.Lot, new Vector3(0, 0, -10.3f)));
+                bays[m.Lot][m.Bay] = null;
+                m.Lot = -1;
+                start = LotRoad(m);
+            }
+            else
+            {
+                if (m.KerbSide != 0) kerb.Remove((m.KerbTile, m.KerbSide));
+                m.KerbSide = 0;
+                start = m.KerbTile;
+            }
+            if (start < 0 || tunnel < 0 || !Route(start, tunnel, 70, route)) return false;
+            AddPath(m, route, Lane, RoadY);
+            TunnelOut(m);
+            m.Next = 1;
+            m.Trip = Trip.Out;
+            return true;
+        }
+
+        int LotRoad(Mover m)
+        {
+            var p = m.Points[m.Points.Count - 1];
+            int x = Mathf.FloorToInt(p.x / CityView.TileSize), y = Mathf.FloorToInt(p.z / CityView.TileSize);
+            for (int r = 0; r <= 1; r++)
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = x + City.DX[d] * r, ny = y + City.DY[d] * r;
+                if (city.IsRoad(nx, ny)) return city.Index(nx, ny);
+            }
+            return -1;
+        }
+
+        /// <summary>A driver gets out in the car park and walks to the building.</summary>
+        void WalkFrom(Vector3 car, int lot, int destination)
+        {
+            if (TooFar(car) || !Front(lot, out int lotRoad, out int lotDir) || !Front(destination, out int road, out int dir)) return;
+            var route = new List<int>();
+            if (!Route(lotRoad, road, 40, route)) return;
+            var m = SendWalker();
+            m.Points.Add(car + Vector3.up * .05f);
+            m.Points.Add(InLot(lot, new Vector3(1.8f, 0, -9.6f)) + Vector3.up * .05f);
+            m.Points.Add(Centre(lotRoad) - Dir(lotDir) * Kerb + Vector3.up * SidewalkY);
+            AddWalk(m, route, SideFor(route, -Dir(lotDir)), dir);
+            m.Points.Add(Centre(road) - Dir(dir) * Kerb + Vector3.up * SidewalkY);
+            if (view.Door(destination, out var door)) m.Points.Add(door);
+            Launch(m);
+        }
+
+        /// <summary>A driver gets out at the kerb and walks to the building.</summary>
+        void WalkFromKerb(Mover car, int destination)
+        {
+            var p = car.Go.transform.position;
+            if (TooFar(p) || !Front(destination, out int road, out int dir)) return;
+            var m = SendWalker();
+            m.Points.Add(p + Vector3.up * .05f);
+            m.Points.Add(Centre(road) - Dir(dir) * Kerb + Vector3.up * SidewalkY);
+            if (view.Door(destination, out var door)) m.Points.Add(door);
+            Launch(m);
+        }
+
+        /// <summary>In the evening the driver walks from work back to the car in the car park; null if nobody shows.</summary>
+        Mover WalkTo(int from, int lot, Vector3 car)
+        {
+            if (TooFar(car) || !Front(lot, out int lotRoad, out int lotDir) || !Front(from, out int road, out int dir)) return null;
+            var route = new List<int>();
+            if (!Route(road, lotRoad, 40, route)) return null;
+            var m = SendWalker();
+            if (view.Door(from, out var door)) m.Points.Add(door);
+            m.Points.Add(Centre(road) - Dir(dir) * Kerb + Vector3.up * SidewalkY);
+            AddWalk(m, route, SideFor(route, -Dir(dir)), lotDir);
+            m.Points.Add(Centre(lotRoad) - Dir(lotDir) * Kerb + Vector3.up * SidewalkY);
+            m.Points.Add(InLot(lot, new Vector3(1.8f, 0, -9.6f)) + Vector3.up * .05f);
+            m.Points.Add(car + Vector3.up * .05f);
+            return Launch(m) ? m : null;
+        }
+
+        float SideFor(List<int> route, Vector3 kerbSide) =>
+            route.Count > 1 && Vector3.Dot(Right(Step(route[0], route[1])), kerbSide) < 0 ? -1 : 1;
+
+        Mover SendWalker()
+        {
+            var m = idleWalkers.Count > 0 ? idleWalkers.Pop() : NewWalker();
+            m.Points.Clear();
+            m.Reverse.Clear();
+            m.Gates.Clear();
+            m.Cleared = -1;
+            return m;
+        }
+
+        bool Launch(Mover m)
+        {
+            if (m.Points.Count < 2 || walkers.Count >= MaxWalkers)
+            {
+                idleWalkers.Push(m);
+                return false;
+            }
+            m.Next = 1;
+            m.Age = 0;
+            m.Leaving = -1;
+            m.Phase = Next() % 100 / 15f;
+            m.Go.transform.position = m.Points[0];
+            m.Go.transform.localScale = Vector3.one;
+            m.Go.SetActive(true);
+            walkers.Add(m);
+            return true;
+        }
+
         void ReleaseCar(int index)
         {
             var m = commuters[index];
+            if (m.Lot >= 0 && bays.TryGetValue(m.Lot, out var taken) && m.Bay >= 0 && taken[m.Bay] == m) taken[m.Bay] = null;
+            if (m.KerbSide != 0) kerb.Remove((m.KerbTile, m.KerbSide));
             m.Go.SetActive(false);
             m.Points.Clear();
             commuters.RemoveAt(index);
@@ -448,8 +782,10 @@ namespace Horizonte.Presentation
         {
             Trace("sale", home);
             if (!Front(home, out int road, out _)) return;
+            // Off to work: out of town through the tunnel.
             var route = new List<int>();
-            Wander(road, 16 + (int)(Next() % 10), route);
+            bool tunnel = TunnelRoad >= 0 && Route(road, TunnelRoad, 70, route);
+            if (!tunnel) Wander(road, 16 + (int)(Next() % 10), route);
             if (g.Car == null) g.Car = Parked(home);
             var m = g.Car;
             var (spot, driveway) = Spots(home);
@@ -465,6 +801,7 @@ namespace Horizonte.Presentation
             m.Points.Add(Centre(road) + Right(next) * Lane + Vector3.up * RoadY);
             m.Reverse.Add(2);
             AddPath(m, route, Lane, RoadY, 1);
+            if (tunnel) TunnelOut(m);
             m.Next = 1;
             m.Age = 1;
             m.Leaving = -1;
@@ -476,10 +813,14 @@ namespace Horizonte.Presentation
         {
             Trace("llega", home);
             if (!Front(home, out int road, out _)) return;
-            // Comes from a few blocks away, along the streets, and turns into the garage.
+            // Home from work: in through the tunnel, along the streets and into the garage.
             var route = new List<int>();
-            Wander(road, 8 + (int)(Next() % 5), route);
-            route.Reverse();
+            bool tunnel = TunnelRoad >= 0 && Route(TunnelRoad, road, 70, route);
+            if (!tunnel)
+            {
+                Wander(road, 8 + (int)(Next() % 5), route);
+                route.Reverse();
+            }
             var m = idleCars.Count > 0 ? idleCars.Pop() : NewCar();
             m.Points.Clear();
             m.Reverse.Clear();
@@ -487,6 +828,7 @@ namespace Horizonte.Presentation
             m.Cleared = -1;
             m.Home = home;
             SetLook(m, CityView.Hash(home, 5));
+            if (tunnel) TunnelIn(m);
             AddPath(m, route, Lane, RoadY);
             var (spot, driveway) = Spots(home);
             m.Points.Add(driveway);
@@ -539,7 +881,7 @@ namespace Horizonte.Presentation
             float step = (m.Car ? (m.Reverse.Contains(m.Next) ? ReverseSpeed : CarSpeed) : WalkSpeed) * dt;
             var p = t.position;
             // Keep a distance from the car ahead.
-            if (m.Car && Blocked(m, p)) step = 0;
+            if (m.Car && Blocked(m, p, dt)) step = 0;
             bool waiting = false;
             while (step > 0 && m.Next < m.Points.Count)
             {
@@ -547,11 +889,12 @@ namespace Horizonte.Presentation
                 var lights = Signals.Instance;
                 if (m.Car && lights != null && m.Gates.TryGetValue(m.Next, out var gate) && lights.State(gate.tile, gate.northSouth) != Signals.Light.Green)
                 {
-                    // Stop at the line before the junction, unless already past it.
-                    float toPoint = Vector3.Distance(p, target);
-                    if (toPoint > StopBack - .8f)
+                    // Stop at the line before the zebra crossing, measured to the middle of the junction along the way
+                    // the car comes in; a car already past the line carries on.
+                    float ahead = Vector3.Dot(gate.centre - p, gate.way);
+                    if (ahead > StopBack - .6f)
                     {
-                        float room = toPoint - StopBack;
+                        float room = ahead - StopBack;
                         if (room <= .02f) { waiting = true; break; }
                         step = Mathf.Min(step, room);
                     }
@@ -582,7 +925,7 @@ namespace Horizonte.Presentation
             heading.y = 0;
             if (m.Reverse.Contains(m.Next)) heading = -heading;
             if (heading.sqrMagnitude > .001f)
-                t.rotation = Quaternion.RotateTowards(t.rotation, Quaternion.LookRotation(heading), (m.Car ? 160 : 420) * dt);
+                t.rotation = Quaternion.RotateTowards(t.rotation, Quaternion.LookRotation(heading), (m.Car ? 240 : 420) * dt);
             if (!m.Car && m.Body != null && !waiting)
             {
                 // A light bob in step with walking.
@@ -639,27 +982,45 @@ namespace Horizonte.Presentation
         }
 
         /// <summary>Metres before the middle of a junction where cars stop on red: just short of its edge.</summary>
-        const float StopBack = 6.2f;
+        const float StopBack = 6.6f;
 
-        /// <summary>Whether another car is just ahead, in the way.</summary>
-        bool Blocked(Mover m, Vector3 p)
+        /// <summary>
+        /// Whether another car is just ahead in the same lane, going the same way. A car held up for several seconds
+        /// with no red light creeps on, so two cars can never wait for each other forever.
+        /// </summary>
+        bool Blocked(Mover m, Vector3 p, float dt)
         {
-            var ahead = m.Go.transform.forward;
             if (m.Reverse.Contains(m.Next)) return false;
+            if (m.Stuck > 4)
+            {
+                m.Stuck = m.Stuck > 5.5f ? 0 : m.Stuck + dt;
+                return false;
+            }
+            var ahead = m.Go.transform.forward;
+            ahead.y = 0;
+            ahead.Normalize();
             foreach (var other in Driving())
             {
                 if (other == m) continue;
                 var v = other.Go.transform.position - p;
                 v.y = 0;
-                float d = v.magnitude;
-                if (d < 7.5f && d > .01f && Vector3.Dot(v / d, ahead) > .82f) return true;
+                float along = Vector3.Dot(v, ahead);
+                if (along < .5f || along > 6.5f) continue;
+                float aside = Mathf.Abs(Vector3.Dot(v, new Vector3(ahead.z, 0, -ahead.x)));
+                if (aside > .9f) continue;
+                var otherWay = other.Go.transform.forward;
+                otherWay.y = 0;
+                if (Vector3.Dot(otherWay.normalized, ahead) < .5f) continue;
+                m.Stuck += dt;
+                return true;
             }
+            m.Stuck = 0;
             return false;
         }
 
         IEnumerable<Mover> Driving()
         {
-            foreach (var c in commuters) yield return c;
+            foreach (var c in commuters) if (c.Trip == Trip.In || c.Trip == Trip.Out || c.Trip == Trip.Stopped) yield return c;
             foreach (var g in garages.Values) if (g.Car != null && g.Car.Points.Count > 0) yield return g.Car;
         }
 
@@ -698,16 +1059,34 @@ namespace Horizonte.Presentation
             return links >= 3;
         }
 
+        /// <summary>
+        /// A car's way along the streets, in its lane on the right. Straight on it passes the middle of each tile; at a
+        /// turn it follows a curve from where it enters the tile to where it leaves. Junctions with lights on the way are
+        /// noted so the car stops before them on red.
+        /// </summary>
         void AddPath(Mover m, List<int> route, float offset, float y, int skip = 0)
         {
+            const float half = CityView.TileSize * .5f;
             for (int k = skip; k < route.Count; k++)
             {
                 int a = k > 0 ? Step(route[k - 1], route[k]) : (route.Count > 1 ? Step(route[0], route[1]) : 0);
                 int b = k + 1 < route.Count ? Step(route[k], route[k + 1]) : a;
-                var side = a == b ? Right(a) : Right(a) + Right(b);
-                // Traffic lights at the junctions on the way, for the direction the car comes in.
-                if (k > 0 && Signals.Instance != null && Signals.Instance.IsJunction(route[k])) m.Gates[m.Points.Count] = (route[k], a == 0 || a == 2);
-                m.Points.Add(Centre(route[k]) + side * offset + Vector3.up * y);
+                var c = Centre(route[k]) + Vector3.up * y;
+                if (k > 0 && Signals.Instance != null && Signals.Instance.IsJunction(route[k]))
+                    m.Gates[m.Points.Count] = (route[k], a == 0 || a == 2, c, Dir(a));
+                if (a == b || b == ((a + 2) & 3))
+                {
+                    m.Points.Add(c + (a == b ? Right(a) : Vector3.zero) * offset);
+                    continue;
+                }
+                var from = c - Dir(a) * half + Right(a) * offset;
+                var to = c + Dir(b) * half + Right(b) * offset;
+                var corner = c + (Right(a) + Right(b)) * offset;
+                for (int s = 0; s <= 4; s++)
+                {
+                    float t = s / 4f;
+                    m.Points.Add((1 - t) * (1 - t) * from + 2 * t * (1 - t) * corner + t * t * to);
+                }
             }
         }
 
@@ -905,6 +1284,7 @@ namespace Horizonte.Presentation
                 body.GetComponent<MeshFilter>().sharedMesh = carMesh;
             }
             body.transform.SetParent(go.transform, false);
+            body.transform.localScale = Vector3.one * .85f;
             m.Body = body.transform;
             return m;
         }

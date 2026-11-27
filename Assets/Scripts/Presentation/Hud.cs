@@ -92,7 +92,7 @@ namespace Horizonte.Presentation
         Btn layersButton;
         Text popupTitle, popupBody, taxText, loanText;
         Btn loanButton;
-        Btn newCityButton, soundButton;
+        Btn newCityButton, soundButton, musicButton;
         Popup popup;
 
         // Minimap.
@@ -432,8 +432,9 @@ namespace Horizonte.Presentation
             }
 
             settingsRow = At("Opciones", popupPanel, 22, 0, 396, 56);
-            newCityButton = MakeButton(settingsRow, "Nueva ciudad", 0, 0, 270, 56, 14, null, 0, "Empezar una ciudad nueva", 19, NewCity);
-            soundButton = MakeButton(settingsRow, "Sonido", 280, 0, 116, 56, 14, null, 0, "Sonido: sí", 19, () => { Sound.Muted = !Sound.Muted; FillPopup(); });
+            newCityButton = MakeButton(settingsRow, "Nueva ciudad", 0, 0, 200, 56, 14, null, 0, "Ciudad nueva", 19, NewCity);
+            musicButton = MakeButton(settingsRow, "Música", 208, 0, 90, 56, 14, null, 0, "Música", 17, () => { Sound.MusicMuted = !Sound.MusicMuted; FillPopup(); });
+            soundButton = MakeButton(settingsRow, "Efectos", 306, 0, 90, 56, 14, null, 0, "Efectos", 17, () => { Sound.EffectsMuted = !Sound.EffectsMuted; FillPopup(); });
             newCityButton.Back.color = new Color(.45f, .14f, .13f, .95f);
             newCityButton.Edge.color = new Color(1, .5f, .45f, .6f);
 
@@ -513,9 +514,11 @@ namespace Horizonte.Presentation
                 case Popup.Settings:
                     popupTitle.text = "Ajustes";
                     popupBody.text = $"Horizonte {Application.version}\n<color=#A9BCE0>La partida se guarda sola cada hora del juego y al salir.</color>";
-                    newCityButton.Label.text = Time.unscaledTime < resetArmedUntil ? "Toca otra vez para confirmar" : "Empezar una ciudad nueva";
-                    soundButton.Label.text = Sound.Muted ? "Sonido: no" : "Sonido: sí";
-                    soundButton.Back.color = Sound.Muted ? UiKit.ButtonColor : UiKit.Accent;
+                    newCityButton.Label.text = Time.unscaledTime < resetArmedUntil ? "Toca otra vez" : "Ciudad nueva";
+                    musicButton.Label.text = Sound.MusicMuted ? "Música: no" : "Música: sí";
+                    musicButton.Back.color = Sound.MusicMuted ? UiKit.ButtonColor : UiKit.Accent;
+                    soundButton.Label.text = Sound.EffectsMuted ? "Efectos: no" : "Efectos: sí";
+                    soundButton.Back.color = Sound.EffectsMuted ? UiKit.ButtonColor : UiKit.Accent;
                     break;
             }
             float bodyHeight = popupBody.preferredHeight;
@@ -617,6 +620,9 @@ namespace Horizonte.Presentation
             if (isolated > 0) alerts.Add($"{N(isolated)} {(isolated == 1 ? "tramo" : "tramos")} de calle sin salida a la carretera.");
             if (c.Money < 0) alerts.Add("La tesorería está en números rojos.");
             else if (c.HasBudget && c.LastIncome < c.LastExpenses) alerts.Add("Gastas más de lo que ingresas cada día.");
+            var traffic = game.Traffic;
+            if (traffic != null && (traffic.StreetParked >= 8 || traffic.TurnedAway >= 3))
+                alerts.Add($"Faltan estacionamientos: {N(traffic.StreetParked)} coches en la calle. Construye uno en Transporte.");
             if (c.TaxRate >= 13) alerts.Add("Los impuestos altos espantan a la gente.");
             alertBadge.gameObject.SetActive(alerts.Count > 0);
             alertBadgeText.text = alerts.Count.ToString();

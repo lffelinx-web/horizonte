@@ -70,6 +70,7 @@ namespace Horizonte.Presentation
 
         static Material[] Materials(BuildingDef def)
         {
+            if (def.ParkingSpaces > 0) return Palette.Get("Asphalt", "LaneLine", "Sidewalk", "Metal");
             if (def.Standalone) return Palette.Get("ZoneIndustrial", "Trunk", "Glass", "StumpCut");
             if (def.LumberReach > 0) return Palette.Get("Trunk", "RoofResidential", "Glass", "StumpCut");
             switch (def.Category)
@@ -86,6 +87,20 @@ namespace Horizonte.Presentation
             }
         }
 
+        /// <summary>
+        /// Parking bays of a lot, in the model's space (front toward -Z): six at the front either side of the entrance and
+        /// eight at the back, each with the way its car faces once parked (away from the aisle along the middle).
+        /// </summary>
+        public static readonly (Vector3 spot, Vector3 facing)[] ParkingSpots = Bays();
+
+        static (Vector3, Vector3)[] Bays()
+        {
+            var list = new List<(Vector3, Vector3)>();
+            foreach (float x in new[] { -8.4f, -6f, -3.6f, 3.6f, 6f, 8.4f }) list.Add((new Vector3(x, 0, -6.6f), Vector3.back));
+            for (int k = 0; k < 8; k++) list.Add((new Vector3(-8.4f + k * 2.4f, 0, 6.6f), Vector3.forward));
+            return list.ToArray();
+        }
+
         // ---------------------------------------------------------------- placeholders (centred on the footprint, front to -Z)
 
         /// <summary>A simple stand-in sized to the footprint and floors of the building, until its model is ready.</summary>
@@ -93,7 +108,35 @@ namespace Horizonte.Presentation
         {
             var b = new MeshBuilder(4);
             float w = def.Width * T - 3, d = def.Height * T - 3;
-            if (def.Standalone)
+            if (def.ParkingSpaces > 0)
+            {
+                // Parking: asphalt, painted bays in two rows either side of an aisle, a ticket booth by the entrance;
+                // the multi-storey one adds concrete decks on columns. Slots: 0 asphalt, 1 paint, 2 concrete, 3 metal.
+                b.Flat(0, -9.7f, -9.7f, 9.7f, 9.7f, .04f);
+                foreach (var (spot, facing) in ParkingSpots)
+                {
+                    float x0 = spot.x - 1.2f, x1 = spot.x + 1.2f, z0 = Mathf.Min(spot.z, spot.z + facing.z * 2.6f) - (facing.z > 0 ? 2.6f : 0), z1 = z0 + 5.2f;
+                    b.Flat(1, x0, z0, x0 + .12f, z1, .06f);
+                    b.Flat(1, x1 - .12f, z0, x1, z1, .06f);
+                }
+                b.Box(2, new Vector3(-3.2f, 0, -9.2f), new Vector3(1.4f, 2.4f, 1.2f));
+                b.Box(3, new Vector3(-3.2f, 2.4f, -9.2f), new Vector3(1.7f, .15f, 1.5f));
+                b.Box(3, new Vector3(-1.9f, .9f, -9.4f), new Vector3(2.2f, .1f, .1f));
+                for (int level = 1; level < def.Floors; level++)
+                {
+                    float y = level * 3.2f;
+                    b.Box(2, new Vector3(0, y, 0), new Vector3(19.4f, .35f, 19.4f));
+                    b.Box(3, new Vector3(0, y + .35f, -9.6f), new Vector3(19.4f, .9f, .12f));
+                    b.Box(3, new Vector3(0, y + .35f, 9.6f), new Vector3(19.4f, .9f, .12f));
+                    b.Box(3, new Vector3(-9.6f, y + .35f, 0), new Vector3(.12f, .9f, 19.4f));
+                    b.Box(3, new Vector3(9.6f, y + .35f, 0), new Vector3(.12f, .9f, 19.4f));
+                }
+                if (def.Floors > 1)
+                    foreach (float cx in new[] { -9.3f, 0f, 9.3f })
+                    foreach (float cz in new[] { -9.3f, 9.3f })
+                        b.Box(2, new Vector3(cx, 0, cz), new Vector3(.5f, (def.Floors - 1) * 3.2f, .5f));
+            }
+            else if (def.Standalone)
             {
                 // Logging camp: a canvas tent, a pile of logs with their pale ends, and a chopping block.
                 b.Box(Roof, new Vector3(-1.2f, 0, 1.2f), new Vector3(.12f, 2.1f, .12f));

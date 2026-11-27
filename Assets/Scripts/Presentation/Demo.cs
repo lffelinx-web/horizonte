@@ -47,6 +47,12 @@ namespace Horizonte.Presentation
             Try(city, "recoleccion_basura", cx - 24, cy + 1);
             Fill(city, Houses, cx - 17, cy + 1, cx - 1, cy + 9);
 
+            // A car park in the middle of town, on the first free lot by a street.
+            bool parked = false;
+            for (int py = cy - 9; py <= cy + 9 && !parked; py++)
+            for (int px = cx - 17; px <= cx - 1 && !parked; px++)
+                parked = city.Place(Catalog.Get("estacionamiento").Id, px, py) == PlaceResult.Ok;
+
             // Wood: a logging camp by the grove across the highway from the first block.
             int gx = cx - 23, ry = cy - 1;
             Try(city, "puesto_tala", gx, ry);

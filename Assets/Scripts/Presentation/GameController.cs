@@ -427,6 +427,27 @@ namespace Horizonte.Presentation
                 ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_cruce_2.png"));
                 yield return null;
                 SetSpeed(0);
+
+                // The morning arrivals: cars out of the tunnel, into the car park, drivers walking to work.
+                int lot = System.Array.FindIndex(City.Building, b => b == Catalog.Get("estacionamiento").Id);
+                if (lot >= 0)
+                {
+                    SetHour(6.2f);
+                    Rig.Focus = CityView.TileCentre(lot % City.Width + 1, lot / City.Width + 1);
+                    Rig.Yaw = 30;
+                    Rig.Distance = 120;
+                    SetSpeed(2);
+                    yield return new WaitForSecondsRealtime(22);
+                    ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_estacionamiento.png"));
+                    yield return null;
+                    Rig.Focus = CityView.TileCentre(2, City.Height / 2);
+                    Rig.Yaw = 285;
+                    Rig.Distance = 110;
+                    yield return new WaitForSecondsRealtime(3);
+                    ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_tunel.png"));
+                    yield return null;
+                    SetSpeed(0);
+                }
                 yield return CloseUp(folder, "captura_edificios.png", i => City.DefAt(i)?.Model == "apartamentos", 110);
                 yield return CloseUp(folder, "captura_servicio.png", i => City.DefAt(i)?.Model == "escuela_primaria", 90);
 

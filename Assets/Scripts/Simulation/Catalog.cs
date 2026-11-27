@@ -61,6 +61,8 @@ namespace Horizonte.Simulation
         public bool AutoFell;
         /// <summary>Must touch the forest reserve.</summary>
         public bool NeedsForest;
+        /// <summary>Parking spaces for the cars of people who come to work or shop.</summary>
+        public int ParkingSpaces;
         /// <summary>Stands on its own, without a street (a temporary logging camp).</summary>
         public bool Standalone;
         /// <summary>Ticks it takes to set up, when it is quicker than its price suggests; zero to use the usual time.</summary>
@@ -170,6 +172,14 @@ namespace Horizonte.Simulation
             bridge.Bridge = true;
             bridge.Summary = "Cruza el río";
             Bridge = bridge.Id;
+            var parking = Serve("estacionamiento", "Estacionamiento", Category.Transport, Service.None, 1200, 15, 2, 2, 0, 0, 0, 0);
+            parking.ParkingSpaces = 14;
+            parking.PowerUse = 0;
+            parking.Summary = "14 cajones · los coches que llegan se estacionan aquí";
+            var garage = Serve("estacionamiento_niveles", "Estacionamiento de varios niveles", Category.Transport, Service.None, 6000, 60, 2, 2, 3, 0, 500, 0);
+            garage.ParkingSpaces = 42;
+            garage.PowerUse = 1;
+            garage.Summary = "42 cajones en tres pisos";
             Serve("terminal_autobuses", "Terminal de autobuses", Category.Transport, Service.Transit, 6000, 250, 3, 2, 1, 16, 800, 4);
             Serve("estacion_tren", "Estación de tren", Category.Transport, Service.Transit, 18000, 600, 5, 2, 2, 26, 3000, 5);
             Serve("estacion_metro", "Estación de metro", Category.Transport, Service.Transit, 12000, 450, 1, 1, 1, 14, 6000, 6);

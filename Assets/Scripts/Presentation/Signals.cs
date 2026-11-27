@@ -73,7 +73,7 @@ namespace Horizonte.Presentation
             bool beep = beepAt <= 0 && speedFactor > 0;
             if (beep) beepAt = 1.1f;
             foreach (var kv in junctions)
-                if (beep) Sound.At("pitido", CityView.TileCentre(kv.Key % city.Width, kv.Key / city.Width), .35f);
+                if (beep) Sound.Beep(CityView.TileCentre(kv.Key % city.Width, kv.Key / city.Width));
             foreach (var kv in junctions)
                 foreach (var (r, a, g, ns) in kv.Value.Heads)
                 {
