@@ -193,7 +193,7 @@ namespace Horizonte.Presentation
             mr.shadowCastingMode = ShadowCastingMode.Off;
         }
 
-        /// <summary>The river and the highway carry on past the edge of the map, over the countryside.</summary>
+        /// <summary>The river carries on past the edge of the map, and the highway arrives from the west over the countryside.</summary>
         static void Beyond(Transform parent, City city)
         {
             uint seed = city.MapSeed;
@@ -220,7 +220,8 @@ namespace Horizonte.Presentation
 
             var road = new MeshBuilder(2);
             float zc = (Landscape.HighwayY(h) + .5f) * T;
-            foreach (var (from, to) in new[] { (-reach, 0f), (w * T, w * T + reach) })
+            // The highway comes in from the west; the way east is for the player to build.
+            foreach (var (from, to) in new[] { (-reach, 0f) })
             {
                 road.Flat(0, from, zc - 3.7f, to, zc + 3.7f, .03f);
                 for (float x = from + .3f; x + 1.4f < to; x += 2.8f) road.Flat(1, x, zc - .14f, x + 1.4f, zc + .14f, .045f);

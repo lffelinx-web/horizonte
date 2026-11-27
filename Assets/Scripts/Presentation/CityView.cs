@@ -123,6 +123,31 @@ namespace Horizonte.Presentation
 
         public static Vector3 TileCentre(int x, int y) => new Vector3((x + .5f) * TileSize, 0, (y + .5f) * TileSize);
 
+        /// <summary>
+        /// Where people come out of a building: its front door when the model marks one ("Puerta", from the material
+        /// named puerta), otherwise the middle of the front a little inside the lot.
+        /// </summary>
+        public bool Door(int anchor, out Vector3 door)
+        {
+            door = default;
+            if (!buildings.TryGetValue(anchor, out var go) || go == null) return false;
+            var mark = go.transform.Find("Puerta");
+            int r = city.Rotation[anchor] & 3;
+            var front = new Vector3(City.DX[r], 0, City.DY[r]);
+            if (mark != null)
+            {
+                // Just outside the doorway, on the ground.
+                door = mark.position + front * .35f;
+                door.y = .05f;
+                return true;
+            }
+            var (w, h) = city.Size(anchor);
+            float half = (r == 0 || r == 2 ? h : w) * TileSize * .5f;
+            door = go.transform.position + front * (half - 2.2f);
+            door.y = .05f;
+            return true;
+        }
+
         public void Init(City c)
         {
             city = c;
@@ -516,7 +541,7 @@ namespace Horizonte.Presentation
             // A few centimetres up so the lot drawn in the model covers the ground underneath.
             go.transform.localPosition = new Vector3((x + w * .5f) * TileSize, .05f, (y + h * .5f) * TileSize);
             buildings[i] = go;
-            if (city.Construction[i] > 0) sites[i] = ConstructionSite.Create(buildingRoot, go, Hash(x, y));
+            if (city.Construction[i] > 0) sites[i] = ConstructionSite.Create(buildingRoot, go, Hash(x, y), w * TileSize, h * TileSize, def.Floors);
         }
     }
 }

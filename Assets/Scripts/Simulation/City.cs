@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Horizonte.Simulation
 {
-    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked, NoRoad, NeedsWater, Mountain, Reserve, NoWood, NeedsForest }
+    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked, NoRoad, NeedsWater, Mountain, Reserve, NoWood, NeedsForest, Trees, NoFront }
 
     /// <summary>What happens when the player marks a tree to be felled.</summary>
     public enum FellResult { Ok, NotATree, NoStation, TooFar, AlreadyMarked }
@@ -202,7 +202,7 @@ namespace Horizonte.Simulation
             if (def == null) return PlaceResult.Occupied;
             var (fw, fh) = Footprint(def, turned);
             if (!IgnoreRequirements && Population < def.MinPopulation) return PlaceResult.Locked;
-            bool mountain = false, reserve = false;
+            bool mountain = false, reserve = false, trees = false;
             for (int dy = 0; dy < fh; dy++)
             for (int dx = 0; dx < fw; dx++)
             {
@@ -212,6 +212,7 @@ namespace Horizonte.Simulation
                 if (water != def.Bridge) return water ? PlaceResult.Water : PlaceResult.Occupied;
                 mountain |= Terrain[i] == Simulation.Terrain.Mountain;
                 reserve |= InReserve(x + dx, y + dy);
+                trees |= IsTree(Terrain[i]);
                 if (Building[i] == Catalog.None) continue;
                 // A street can be rebuilt as an avenue and back.
                 var there = DefAt(i);
@@ -220,7 +221,11 @@ namespace Horizonte.Simulation
             }
             if (mountain) return PlaceResult.Mountain;
             if (reserve) return PlaceResult.Reserve;
-            if (!def.IsRoad && !Touches(x, y, fw, fh, IsRoad)) return PlaceResult.NoRoad;
+            // Trees have to be felled first (which gives their wood); showcases and tests clear them.
+            if (trees && !IgnoreRequirements) return PlaceResult.Trees;
+            if (!def.IsRoad && !def.Standalone && !Touches(x, y, fw, fh, IsRoad)) return PlaceResult.NoRoad;
+            // A rectangular building only goes where its front (the side along its width) meets the street.
+            if (!def.IsRoad && !def.Standalone && def.Width != def.Height && FrontRoad(x, y, fw, fh, turned) < 0) return PlaceResult.NoFront;
             if (def.NeedsForest && !Touches(x, y, fw, fh, InReserve)) return PlaceResult.NeedsForest;
             if (!IgnoreRequirements && Wood < def.Wood) return PlaceResult.NoWood;
             if (def.NeedsWater && !Touches(x, y, fw, fh, (tx, ty) => InBounds(tx, ty) && Terrain[Index(tx, ty)] == Simulation.Terrain.Water))
@@ -294,19 +299,12 @@ namespace Horizonte.Simulation
             return placed;
         }
 
-        /// <summary>Removes the building on the tile (all of it), or clears forest.</summary>
+        /// <summary>Removes the building on the tile (all of it). Trees are felled by a lumberjack, not bulldozed.</summary>
         public bool Bulldoze(int x, int y)
         {
             if (!InBounds(x, y)) return false;
             int i = Index(x, y);
-            if (Building[i] == Catalog.None)
-            {
-                if (!IsTree(Terrain[i]) || InReserve(x, y) || Money < Catalog.ClearForestCost) return false;
-                Money -= Catalog.ClearForestCost;
-                Terrain[i] = Simulation.Terrain.Grass;
-                MarkChanged(i);
-                return true;
-            }
+            if (Building[i] == Catalog.None) return false;
             if (Money < Catalog.BulldozeCost) return false;
             Money -= Catalog.BulldozeCost;
             var def = DefAt(i);
@@ -405,7 +403,7 @@ namespace Horizonte.Simulation
         {
             var def = DefAt(anchor);
             if (def == null || def.IsRoad) return false;
-            return Served[anchor] && Construction[anchor] == 0 && (def.Kind == Kind.Power || def.PowerUse == 0 || Powered[anchor]);
+            return (Served[anchor] || def.Standalone) && Construction[anchor] == 0 && (def.Kind == Kind.Power || def.PowerUse == 0 || Powered[anchor]);
         }
 
         // ---------------------------------------------------------------- forest and wood
@@ -433,7 +431,7 @@ namespace Horizonte.Simulation
         /// <summary>Marks a tree of the reserve for the lumberjack of a forest station in reach.</summary>
         public FellResult MarkTree(int x, int y)
         {
-            if (!InBounds(x, y) || !InReserve(x, y) || Terrain[Index(x, y)] != Simulation.Terrain.Forest) return FellResult.NotATree;
+            if (!InBounds(x, y) || Terrain[Index(x, y)] != Simulation.Terrain.Forest) return FellResult.NotATree;
             int i = Index(x, y);
             if (Marked.Contains(i)) return FellResult.AlreadyMarked;
             bool any = false;
@@ -571,7 +569,8 @@ namespace Horizonte.Simulation
                     Terrain[i] = Simulation.Terrain.Forest;
                     MarkChanged(i);
                 }
-                else if (t == Simulation.Terrain.Stumps && Building[i] == Catalog.None)
+                // Only the reserve grows back; trees felled elsewhere are gone.
+                else if (t == Simulation.Terrain.Stumps && Building[i] == Catalog.None && InReserve(i % Width, i / Width))
                 {
                     int x = i % Width, y = i / Width;
                     bool seeds = false;

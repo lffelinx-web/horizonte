@@ -67,6 +67,7 @@ namespace Horizonte.EditorTools
             Directory.CreateDirectory(GeneratedFolder);
             AssetDatabase.Refresh();
 
+            doors.Clear();
             var palette = new List<Swatch>();
             var lookup = new Dictionary<Swatch, int>();
             var baked = new List<(string name, Mesh mesh)>();
@@ -104,13 +105,19 @@ namespace Horizonte.EditorTools
 
                 var go = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
                 go.GetComponent<MeshFilter>().sharedMesh = mesh;
+                if (doors.TryGetValue(name, out var door))
+                {
+                    var mark = new GameObject("Puerta").transform;
+                    mark.SetParent(go.transform, false);
+                    mark.localPosition = door;
+                }
                 var renderer = go.GetComponent<MeshRenderer>();
                 renderer.sharedMaterial = material;
                 renderer.shadowCastingMode = ShadowCastingMode.On;
                 PrefabUtility.SaveAsPrefabAsset(go, $"{PrefabFolder}/{name}.prefab");
                 UnityEngine.Object.DestroyImmediate(go);
                 var b = mesh.bounds;
-                Debug.Log($"Horizonte: edificio {name}: {mesh.vertexCount} vértices, {b.size.x:0.0} x {b.size.z:0.0} m, {b.size.y:0.0} m de alto, {mesh.lodCount} niveles de detalle.");
+                Debug.Log($"Horizonte: edificio {name}: {mesh.vertexCount} vértices, {b.size.x:0.0} x {b.size.z:0.0} m, {b.size.y:0.0} m de alto, {mesh.lodCount} niveles de detalle{(doors.ContainsKey(name) ? ", con puerta" : ", sin puerta")}.");
             }
             RemoveStale(baked.Select(b => b.name).ToHashSet());
             AssetDatabase.SaveAssets();
@@ -154,9 +161,11 @@ namespace Horizonte.EditorTools
                 var materials = renderer.sharedMaterials;
                 for (int s = 0; s < source.subMeshCount; s++)
                 {
-                    int index = PaletteIndex(s < materials.Length ? materials[s] : null, palette, lookup);
+                    var material = s < materials.Length ? materials[s] : null;
+                    int index = PaletteIndex(material, palette, lookup);
                     map.Clear();
                     var tris = source.GetTriangles(s);
+                    if (material != null && IsDoor(material.name)) FindDoor(name, tris, srcVertices, matrix);
                     for (int t = 0; t < tris.Length; t += 3)
                     {
                         int a = Vertex(tris[t]), b = Vertex(tris[t + 1]), c = Vertex(tris[t + 2]);
@@ -186,6 +195,31 @@ namespace Horizonte.EditorTools
             mesh.RecalculateBounds();
             mesh.RecalculateTangents();
             return mesh;
+        }
+
+        /// <summary>Front door of each model (the bottom middle of its "puerta" faces nearest the front), where people come out.</summary>
+        static readonly Dictionary<string, Vector3> doors = new Dictionary<string, Vector3>();
+
+        static bool IsDoor(string material)
+        {
+            string n = material.ToLowerInvariant();
+            return n.Contains("puerta") || n.Contains("door") || n.Contains("acceso");
+        }
+
+        static void FindDoor(string name, int[] tris, Vector3[] source, Matrix4x4 matrix)
+        {
+            if (tris.Length == 0) return;
+            var lo = Vector3.one * float.MaxValue;
+            var hi = Vector3.one * float.MinValue;
+            foreach (int v in tris)
+            {
+                var p = matrix.MultiplyPoint3x4(source[v]);
+                lo = Vector3.Min(lo, p);
+                hi = Vector3.Max(hi, p);
+            }
+            var door = new Vector3((lo.x + hi.x) * .5f, lo.y, lo.z);
+            // The front faces -Z: of several doors, the one furthest forward.
+            if (!doors.TryGetValue(name, out var best) || door.z < best.z) doors[name] = door;
         }
 
         static int PaletteIndex(Material m, List<Swatch> palette, Dictionary<Swatch, int> lookup)

@@ -51,6 +51,7 @@ namespace Horizonte.Presentation
 
         City city;
         CameraRig rig;
+        CityView view;
         float speed = 1;
         readonly List<Mover> walkers = new List<Mover>();
         readonly Stack<Mover> idleWalkers = new Stack<Mover>();
@@ -66,10 +67,11 @@ namespace Horizonte.Presentation
         Mesh carMesh;
         Material[][] carLooks;
 
-        public void Init(City c, CameraRig r)
+        public void Init(City c, CameraRig r, CityView v)
         {
             city = c;
             rig = r;
+            view = v;
             foreach (Transform child in transform) Destroy(child.gameObject);
             walkers.Clear();
             idleWalkers.Clear();
@@ -179,21 +181,33 @@ namespace Horizonte.Presentation
 
         // ---------------------------------------------------------------- people
 
-        /// <summary>People per second leaving buildings, for a busy neighbourhood, by time of day.</summary>
-        float Rate()
+        /// <summary>
+        /// Share of the residents who head out in an hour: half the working people over the morning rush and back over the
+        /// evening one, a few errands at midday, and nearly nobody at night.
+        /// </summary>
+        float OutPerHour()
         {
-            float t = TimeOfDay;
-            if (t < .22f || t > .9f) return .12f;
-            if (t < .4f) return 1.6f;
-            if (t < .66f) return .9f;
-            if (t < .82f) return 1.6f;
-            return .5f;
+            float h = TimeOfDay * 24;
+            if (h < 5 || h >= 22) return .002f;
+            if (h < 6) return .015f;
+            if (h < 9) return .1f;
+            if (h < 12) return .025f;
+            if (h < 15) return .045f;
+            if (h < 17) return .025f;
+            if (h < 20) return .1f;
+            return .02f;
         }
+
+        bool Evening => TimeOfDay * 24 >= 17 && TimeOfDay * 24 < 22;
 
         void SpawnWalkers(float dt)
         {
             if (nearby.Count == 0) return;
-            spawnDebt += dt * Rate() * Mathf.Min(1, nearby.Count / 8f);
+            int residents = 0;
+            foreach (int i in nearby)
+                if (city.DefAt(i).Kind == Kind.Housing) residents += city.Occupants[i];
+            // A game hour lasts twenty seconds.
+            spawnDebt += dt * residents * OutPerHour() / 20f;
             while (spawnDebt >= 1)
             {
                 spawnDebt -= 1;
@@ -202,57 +216,83 @@ namespace Horizonte.Presentation
             }
         }
 
+        /// <summary>
+        /// Someone comes out of a front door and walks to another building, going in through its door. Until the evening
+        /// people leave home (for work, school or shopping); in the evening they come back home.
+        /// </summary>
         void TrySpawnWalker()
         {
-            float t = TimeOfDay;
-            bool morning = t >= .22f && t < .4f, evening = t >= .66f && t < .82f;
-            // Mornings people leave home for work and school; afternoons they head back.
-            int from = Pick(i => Weight(i, morning ? 3 : evening ? .4f : 1, morning ? .4f : evening ? 3 : 1));
-            if (from < 0) return;
-            bool fromHome = city.DefAt(from).Kind == Kind.Housing;
-            int to = Pick(i => i == from ? 0 : fromHome ? Weight(i, morning ? .2f : 1, 1) : Weight(i, evening ? 3 : 1, evening ? .2f : 1));
-            if (!Front(from, out int startRoad, out int startDir)) return;
+            bool evening = Evening;
+            int home = Pick(i => city.DefAt(i).Kind == Kind.Housing ? city.Occupants[i] : 0);
+            if (home < 0) return;
+            int other = Pick(i => i != home && city.DefAt(i).Kind != Kind.Housing ? Mathf.Min(8, 1 + city.DefAt(i).Jobs / 6f) : 0);
+            if (!Front(home, out int homeRoad, out int homeDir)) return;
 
+            int from = home, fromRoad = homeRoad, fromDir = homeDir, to = -1, toRoad = -1, toDir = 0;
             var route = new List<int>();
-            int endRoad = -1, endDir = 0;
-            if (to >= 0 && Front(to, out endRoad, out endDir) && Route(startRoad, endRoad, 60, route)) { }
+            if (other >= 0 && Front(other, out int otherRoad, out int otherDir) && Route(homeRoad, otherRoad, 60, route))
+            {
+                if (evening)
+                {
+                    // From work back home.
+                    route.Reverse();
+                    from = other; fromRoad = otherRoad; fromDir = otherDir;
+                    to = home; toRoad = homeRoad; toDir = homeDir;
+                }
+                else { to = other; toRoad = otherRoad; toDir = otherDir; }
+            }
             else
             {
-                to = -1;
-                Wander(startRoad, 5 + (int)(Next() % 8), route);
+                // Nowhere nearby to go: a walk round the block, out and back in the morning, or home from further away.
+                Wander(homeRoad, 5 + (int)(Next() % 8), route);
+                if (evening)
+                {
+                    route.Reverse();
+                    from = -1;
+                    fromRoad = route[0];
+                    to = home; toRoad = homeRoad; toDir = homeDir;
+                }
             }
 
             var m = idleWalkers.Count > 0 ? idleWalkers.Pop() : NewWalker();
             m.Points.Clear();
             m.Reverse.Clear();
-            var door = Door(startRoad, startDir);
-            m.Points.Add(door - Dir(startDir) * 1.2f + Vector3.up * .05f);
-            m.Points.Add(door + Vector3.up * .05f);
-            m.Points.Add(Centre(startRoad) - Dir(startDir) * Kerb + Vector3.up * SidewalkY);
-            float side = route.Count > 1 && Vector3.Dot(Right(Step(route[0], route[1])), -Dir(startDir)) < 0 ? -1 : 1;
+            if (from >= 0)
+            {
+                // Out of the front door and down to the sidewalk.
+                if (!view.Door(from, out var door)) door = Door(fromRoad, fromDir);
+                m.Points.Add(door);
+                m.Points.Add(Centre(fromRoad) - Dir(fromDir) * Kerb + Vector3.up * SidewalkY);
+            }
+            float side = 1;
+            if (route.Count > 1)
+            {
+                var kerb = from >= 0 ? -Dir(fromDir) : Right(Step(route[0], route[1]));
+                side = Vector3.Dot(Right(Step(route[0], route[1])), kerb) < 0 ? -1 : 1;
+            }
             AddPath(m, route, side * Kerb, SidewalkY);
             if (to >= 0)
             {
-                var their = Door(endRoad, endDir);
-                m.Points.Add(Centre(endRoad) - Dir(endDir) * Kerb + Vector3.up * SidewalkY);
-                m.Points.Add(their + Vector3.up * .05f);
-                m.Points.Add(their - Dir(endDir) * 1.2f + Vector3.up * .05f);
+                m.Points.Add(Centre(toRoad) - Dir(toDir) * Kerb + Vector3.up * SidewalkY);
+                if (!view.Door(to, out var theirs)) theirs = Door(toRoad, toDir);
+                m.Points.Add(theirs);
+            }
+            if (m.Points.Count < 2)
+            {
+                idleWalkers.Push(m);
+                return;
             }
             m.Next = 1;
             m.Age = 0;
             m.Leaving = -1;
             m.Phase = Next() % 100 / 15f;
             m.Go.transform.position = m.Points[0];
-            m.Go.transform.localScale = Vector3.zero;
+            m.Go.transform.localScale = Vector3.one;
+            var heading = m.Points[1] - m.Points[0];
+            heading.y = 0;
+            if (heading.sqrMagnitude > .001f) m.Go.transform.rotation = Quaternion.LookRotation(heading);
             m.Go.SetActive(true);
             walkers.Add(m);
-        }
-
-        float Weight(int i, float homes, float others)
-        {
-            var def = city.DefAt(i);
-            if (def.Kind == Kind.Housing) return homes * Mathf.Min(8, 1 + city.Occupants[i] / 6f);
-            return others * Mathf.Min(8, 1 + def.Jobs / 6f);
         }
 
         int Pick(System.Func<int, float> weight)
@@ -398,7 +438,6 @@ namespace Horizonte.Presentation
         {
             var t = m.Go.transform;
             m.Age += dt;
-            if (!m.Car) t.localScale = Vector3.one * Mathf.Clamp01(m.Leaving >= 0 ? 1 - m.Leaving / .35f : m.Age / .35f);
             if (m.Leaving >= 0)
             {
                 m.Leaving += dt;
@@ -425,12 +464,8 @@ namespace Horizonte.Presentation
                 }
             }
             t.position = p;
-            if (m.Next >= m.Points.Count)
-            {
-                if (m.Car) return false;
-                m.Leaving = 0;
-                return true;
-            }
+            // People go in through the door at the end of their walk; cars finish their trip.
+            if (m.Next >= m.Points.Count) return false;
             var heading = m.Points[m.Next] - m.Points[m.Next - 1];
             heading.y = 0;
             if (m.Reverse.Contains(m.Next)) heading = -heading;

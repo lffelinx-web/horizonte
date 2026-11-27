@@ -61,6 +61,10 @@ namespace Horizonte.Simulation
         public bool AutoFell;
         /// <summary>Must touch the forest reserve.</summary>
         public bool NeedsForest;
+        /// <summary>Stands on its own, without a street (a temporary logging camp).</summary>
+        public bool Standalone;
+        /// <summary>Ticks it takes to set up, when it is quicker than its price suggests; zero to use the usual time.</summary>
+        public int QuickBuild;
         /// <summary>Floors, for the placeholder drawn until the model exists.</summary>
         public int Floors = 1;
         /// <summary>One line for the building menu.</summary>
@@ -75,6 +79,7 @@ namespace Horizonte.Simulation
         public const int ClearForestCost = 5;
         /// <summary>Money paid for each unit of wood sold.</summary>
         public const int WoodPrice = 12;
+        const int TicksPerHourForCamp = 12;
         /// <summary>Wood from one tile of forest, felled by hand or by a sawmill.</summary>
         public const int WoodPerTree = 4, WoodPerSawmillTree = 6;
         /// <summary>Upkeep in the catalog lines is per month of the old clock (20 seconds); a day now lasts as long as 24 of those.</summary>
@@ -194,6 +199,13 @@ namespace Horizonte.Simulation
             // Industry and production.
             Work("granja_agricola", "Granja agrícola", Category.Industry, 1500, 4, 4, 1, 12, true);
             Work("procesadora_alimentos", "Planta de alimentos", Category.Industry, 5000, 3, 3, 2, 40, true, 100, -15, 4);
+            // Temporary logging camp: a tent and a woodpile anywhere near the trees, no street or power needed.
+            var camp = Work("puesto_tala", "Puesto de tala temporal", Category.Industry, 150, 1, 1, 0, 2, true);
+            camp.LumberReach = 8;
+            camp.PowerUse = 0;
+            camp.Standalone = true;
+            camp.QuickBuild = TicksPerHourForCamp;
+            camp.Summary = "Su leñador tala los árboles que marques cerca";
             var station = Work("caseta_forestal", "Caseta forestal", Category.Industry, 400, 1, 1, 1, 3, true, 0, -2, 2);
             station.LumberReach = 14;
             station.PowerUse = 0;
@@ -327,7 +339,7 @@ namespace Horizonte.Simulation
         /// eight for a tower and up to half a day for the biggest projects. Streets are instant.
         /// </summary>
         public static int BuildTicks(BuildingDef def) =>
-            def.IsRoad ? 0 : (int)System.Math.Round(System.Math.Min(13, .72 * System.Math.Pow(def.Cost, .25)) * City.TicksPerHour);
+            def.IsRoad ? 0 : def.QuickBuild > 0 ? def.QuickBuild : (int)System.Math.Round(System.Math.Min(13, .72 * System.Math.Pow(def.Cost, .25)) * City.TicksPerHour);
 
         // ---------------------------------------------------------------- services
 

@@ -20,7 +20,8 @@ namespace Horizonte.Presentation
         readonly List<GameObject> scaffoldLevels = new List<GameObject>();
         readonly List<GameObject> lotOnly = new List<GameObject>();
         GameObject scaffoldRoot, liftRoot;
-        float height, craneHeight, jibLength, shown, target, phase, hx, hz;
+        float height, craneHeight, jibLength, shown, target, phase, hx, hz, lotX, lotZ;
+        int floorsHint;
 
         sealed class Worker
         {
@@ -34,7 +35,8 @@ namespace Horizonte.Presentation
         static Mesh cube;
 
         /// <summary>Builds the site around a building already placed in the world and hides the building until it is nearly done.</summary>
-        public static ConstructionSite Create(Transform parent, GameObject buildingObject, uint seed)
+        /// <param name="lotX">Width of the lot in metres (east-west) and <paramref name="lotZ"/> its depth; nothing of the site leaves it.</param>
+        public static ConstructionSite Create(Transform parent, GameObject buildingObject, uint seed, float lotX, float lotZ, int floors)
         {
             // Measure the finished building before hiding it.
             var bounds = new Bounds(buildingObject.transform.position, Vector3.zero);
@@ -42,13 +44,18 @@ namespace Horizonte.Presentation
 
             var go = new GameObject("Obra");
             go.transform.SetParent(parent, false);
-            go.transform.position = new Vector3(bounds.center.x, buildingObject.transform.position.y, bounds.center.z);
+            go.transform.position = buildingObject.transform.position;
             var site = go.AddComponent<ConstructionSite>();
             site.building = buildingObject;
-            site.height = Mathf.Max(2.5f, bounds.size.y);
+            // Placeholders may carry a tall chimney; the frame follows the floors.
+            site.height = Mathf.Max(2.5f, Mathf.Min(bounds.size.y, Mathf.Max(3, floors * 3.8f) + 2));
             site.phase = seed % 1000 * .37f;
             site.random = seed | 1;
-            site.Build(bounds.size.x, bounds.size.z);
+            site.lotX = lotX * .5f;
+            site.lotZ = lotZ * .5f;
+            site.floorsHint = floors;
+            // The frame and its scaffold fit inside the lot, whatever the model measures.
+            site.Build(Mathf.Min(bounds.size.x, lotX - 2.1f), Mathf.Min(bounds.size.z, lotZ - 2.1f));
             site.Apply();
             return site;
         }
@@ -73,8 +80,8 @@ namespace Horizonte.Presentation
             hx = sizeX * .5f;
             hz = sizeZ * .5f;
 
-            // Lot: tape on posts around the footprint, and materials stacked by the front.
-            float tx = hx + 1.2f, tz = hz + 1.2f;
+            // Lot: tape on posts just inside its edge, and materials stacked by the front.
+            float tx = lotX - .3f, tz = lotZ - .3f;
             foreach (var (a, b) in new[] { (new Vector3(-tx, 0, -tz), new Vector3(tx, 0, -tz)), (new Vector3(tx, 0, -tz), new Vector3(tx, 0, tz)), (new Vector3(tx, 0, tz), new Vector3(-tx, 0, tz)), (new Vector3(-tx, 0, tz), new Vector3(-tx, 0, -tz)) })
             {
                 int n = Mathf.Max(1, Mathf.RoundToInt(Vector3.Distance(a, b) / 3));
@@ -86,8 +93,8 @@ namespace Horizonte.Presentation
                 var mid = (a + b) * .5f;
                 lotOnly.Add(Cube(transform, mid + Vector3.up * .85f, new Vector3(Mathf.Abs(b.x - a.x) + .05f, .08f, Mathf.Abs(b.z - a.z) + .05f), tape));
             }
-            Cube(transform, new Vector3(-hx * .6f, .35f, -tz + .8f), new Vector3(1.6f, .7f, 1.1f), bricks);
-            Cube(transform, new Vector3(hx * .5f, .2f, -tz + .8f), new Vector3(3.2f, .4f, .9f), wood);
+            Cube(transform, new Vector3(-tx * .55f, .35f, -tz + .7f), new Vector3(1.2f, .7f, .9f), bricks);
+            Cube(transform, new Vector3(tx * .45f, .2f, -tz + .7f), new Vector3(Mathf.Min(3.2f, tx * .7f), .4f, .8f), wood);
 
             foundation = Cube(transform, new Vector3(0, .2f, 0), new Vector3(sizeX + .4f, .4f, sizeZ + .4f), concrete).transform;
 
@@ -116,7 +123,7 @@ namespace Horizonte.Presentation
             }
 
             // Scaffold in levels of two metres, shown as the frame rises.
-            const float margin = .9f, deck = .75f, poleSpacing = 2.6f;
+            const float margin = .35f, deck = .5f, poleSpacing = 2.6f;
             float sx = hx + margin, sz = hz + margin, top = height + 1;
             scaffoldRoot = new GameObject("Andamios");
             scaffoldRoot.transform.SetParent(transform, false);
@@ -169,11 +176,11 @@ namespace Horizonte.Presentation
                 workers.Add(new Worker { Go = person, Target = RandomSpot(), Wait = Next() % 100 / 40f });
             }
 
-            // Tower crane beside tall or wide buildings.
-            if (height < 8 && Mathf.Max(sizeX, sizeZ) < 15) return;
-            craneHeight = height + 9;
-            jibLength = Mathf.Max(12, Mathf.Max(sizeX, sizeZ) * .9f);
-            var towerPos = new Vector3(sx + 3, 0, sz + 3);
+            // Tower crane in a back corner of the lot, for buildings of three floors or more on a lot of 2 x 2 or more.
+            if (floorsHint < 3 || Mathf.Min(lotX, lotZ) < 9.5f) return;
+            craneHeight = height + 5;
+            jibLength = Mathf.Clamp(Mathf.Max(lotX, lotZ) * 1.4f, 9, 22);
+            var towerPos = new Vector3(lotX - 1, 0, lotZ - 1);
             for (float y = 0; y < craneHeight; y += 3)
             {
                 Cube(transform, towerPos + new Vector3(0, y + 1.5f, 0), new Vector3(1.2f, 2.6f, 1.2f), yellow);
@@ -201,7 +208,7 @@ namespace Horizonte.Presentation
         Vector3 RandomSpot()
         {
             uint r = Next();
-            return new Vector3(((r & 1023) / 1023f * 2 - 1) * (hx + .6f), 0, (((r >> 10) & 1023) / 1023f * 2 - 1) * (hz + .6f));
+            return new Vector3(((r & 1023) / 1023f * 2 - 1) * Mathf.Min(hx + .6f, lotX - .7f), 0, (((r >> 10) & 1023) / 1023f * 2 - 1) * Mathf.Min(hz + .6f, lotZ - .7f));
         }
 
         uint Next()

@@ -135,11 +135,11 @@ namespace Horizonte.Presentation
                 case Shape.Line: return $"{Label(t)}  ·  {CostLabel(t)}  ·  arrastra para trazar";
                 case Shape.Rect:
                     return t.IsFell
-                        ? "Talar  ·  toca árboles de la reserva o arrastra para marcar varios  ·  el leñador de la caseta los corta"
+                        ? "Talar  ·  toca árboles o arrastra para marcar varios  ·  el leñador del puesto de tala los corta"
                         : $"Demoler  ·  {CostLabel(t)}  ·  arrastra sobre lo que quieras quitar";
                 case Shape.Single:
                     var def = t.Def;
-                    string where = def.NeedsWater ? "junto al río y a una calle" : "junto a una calle";
+                    string where = def.Standalone ? "cerca de los árboles" : def.NeedsForest ? "junto a la reserva forestal y a una calle" : def.NeedsWater ? "junto al río y a una calle" : "junto a una calle";
                     return $"{def.Name}  ·  {CostLabel(t)}  ·  {def.Width} × {def.Height}  ·  toca {where}";
                 default: return null;
             }

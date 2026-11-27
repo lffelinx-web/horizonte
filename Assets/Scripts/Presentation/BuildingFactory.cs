@@ -70,6 +70,8 @@ namespace Horizonte.Presentation
 
         static Material[] Materials(BuildingDef def)
         {
+            if (def.Standalone) return Palette.Get("ZoneIndustrial", "Trunk", "Glass", "StumpCut");
+            if (def.LumberReach > 0) return Palette.Get("Trunk", "RoofResidential", "Glass", "StumpCut");
             switch (def.Category)
             {
                 case Category.Housing: return Palette.Get("WallResidential", "RoofResidential", "Glass", "Trim");
@@ -91,7 +93,23 @@ namespace Horizonte.Presentation
         {
             var b = new MeshBuilder(4);
             float w = def.Width * T - 3, d = def.Height * T - 3;
-            if (def.Floors == 0)
+            if (def.Standalone)
+            {
+                // Logging camp: a canvas tent, a pile of logs with their pale ends, and a chopping block.
+                b.Box(Roof, new Vector3(-1.2f, 0, 1.2f), new Vector3(.12f, 2.1f, .12f));
+                b.GableRoof(Wall, new Vector3(-1.2f, 0, 1.2f), 3.2f, 3.4f, 2.3f);
+                for (int r = 0; r < 3; r++)
+                for (int k = 0; k < 3 - r; k++)
+                {
+                    var at = new Vector3(2.1f, .42f * r, -1.8f + k * .5f + r * .25f);
+                    b.Box(Roof, at, new Vector3(2.6f, .42f, .42f));
+                    b.Box(Accent, at + new Vector3(1.31f, .02f, 0), new Vector3(.02f, .38f, .38f));
+                    b.Box(Accent, at - new Vector3(1.31f, -.02f, 0), new Vector3(.02f, .38f, .38f));
+                }
+                b.Cylinder(Roof, new Vector3(-.8f, 0, -2.4f), .4f, .55f, 8);
+                b.Cylinder(Accent, new Vector3(-.8f, .55f, -2.4f), .38f, .02f, 8);
+            }
+            else if (def.Floors == 0)
             {
                 // Open spaces: lawn, paths and trees. Slots: 0 leaves, 1 trunk, 2 paths, 3 lawn.
                 float hw = def.Width * T * .5f - .3f, hd = def.Height * T * .5f - .3f;
@@ -131,7 +149,7 @@ namespace Horizonte.Presentation
                 Windows(b, c, bw, bd, h, def.Floors, def.Category == Category.Industry ? 3f : 1.8f);
                 // A coloured band over the entrance so categories read at a glance.
                 b.Box(Accent, c + new Vector3(0, Mathf.Min(h - .6f, 3.2f), -bd * .5f - .3f), new Vector3(Mathf.Min(bw, 8), .5f, .6f));
-                if (def.Category == Category.Industry || (def.Kind == Kind.Power && def.Desirability < 0))
+                if ((def.Category == Category.Industry && def.LumberReach == 0) || (def.Kind == Kind.Power && def.Desirability < 0))
                 {
                     b.Cylinder(Accent, c + new Vector3(bw * .3f, h, bd * .2f), .8f, 8 + def.Floors * 2, 8);
                     if (def.Width >= 3) b.Cylinder(Roof, new Vector3(-bw * .3f, 0, d * .5f - 2.5f), 2.2f, 6 + def.Floors * 2, 12);

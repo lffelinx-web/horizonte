@@ -475,8 +475,8 @@ namespace Horizonte.Presentation
                     popupBody.text = $"Tienes <b>{N(c.Wood)}</b> de madera.\n" +
                         "Las casas y algunos edificios la usan para construirse; la que sobra se vende a " + $"<b>$ {Catalog.WoodPrice}</b> cada una.\n\n" +
                         (stations + sawmills == 0
-                            ? "<color=#A9BCE0>Construye una <b>caseta forestal</b> junto a la reserva (Industria) y marca árboles con <b>Talar</b>.</color>"
-                            : $"<color=#A9BCE0>{stations} {(stations == 1 ? "caseta" : "casetas")} y {sawmills} {(sawmills == 1 ? "aserradero" : "aserraderos")} trabajando. Árboles marcados: {c.Marked.Count}.</color>");
+                            ? "<color=#A9BCE0>Pon un <b>puesto de tala temporal</b> cerca de los árboles (Industria) y marca árboles con <b>Talar</b>. Fuera de la reserva los árboles no vuelven a crecer.</color>"
+                            : $"<color=#A9BCE0>{stations} {(stations == 1 ? "puesto de tala" : "puestos de tala")} y {sawmills} {(sawmills == 1 ? "aserradero" : "aserraderos")} trabajando. Árboles marcados: {c.Marked.Count}.</color>");
                     break;
                 case Popup.Alerts:
                     popupTitle.text = "Avisos";
@@ -486,7 +486,7 @@ namespace Horizonte.Presentation
                     popupTitle.text = "Cómo se juega";
                     popupBody.text =
                         "Traza <b>calles</b> conectadas con la carretera y coloca los edificios junto a ellas. Empieza con un <b>generador</b>, unas casas y una tienda: sin calle, sin luz y sin empleos nadie llega.\n\n" +
-                        "Las casas se construyen con <b>madera</b>. Pon una <b>caseta forestal</b> en la entrada de la reserva y marca árboles con <b>Talar</b>: el leñador los corta y trae la madera. Un día dura 8 minutos y los impuestos se cobran cada mañana.\n\n" +
+                        "Las casas se construyen con <b>madera</b> y no se construye donde hay árboles. Pon un <b>puesto de tala temporal</b> junto a los árboles y márcalos con <b>Talar</b>: el leñador los corta y trae la madera. Un día dura 8 minutos y los impuestos se cobran cada mañana.\n\n" +
                         "<color=#A9BCE0>Un dedo construye o, en Explorar, mueve el mapa. Dos dedos mueven, acercan y giran. Toca un edificio para ver sus datos.</color>";
                     break;
                 case Popup.Settings:
@@ -970,7 +970,7 @@ namespace Horizonte.Presentation
                         break;
                     case Terrain.Forest:
                         infoTitle.text = reserve ? "Reserva forestal" : "Bosque";
-                        infoSubtitle.text = reserve ? "Márcalo con Talar para tener madera" : "Terreno";
+                        infoSubtitle.text = reserve ? "Aquí los árboles vuelven a crecer" : "Márcalo con Talar para tener madera";
                         infoTile.color = new Color(.22f, .45f, .22f);
                         icon = "forest";
                         break;
@@ -987,7 +987,6 @@ namespace Horizonte.Presentation
                     var (power, powerColor) = YesNo(c.PowerCover[i]);
                     AddCard("bolt", UiKit.Warn, "Red eléctrica", power, powerColor);
                 }
-                if (City.IsTree(t) && !reserve) demolish = $"Talar  ·  $ {Catalog.ClearForestCost}";
                 game.View.ClearSelection();
             }
             else

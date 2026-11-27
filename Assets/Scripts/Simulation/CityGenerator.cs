@@ -5,8 +5,9 @@ namespace Horizonte.Simulation
     /// <summary>
     /// Makes a new map after the territory sketch: mountains in the north-west, the river from north to south, a fenced
     /// forest reserve on the far bank to the north-east, fertile fields on the far bank to the south-east, a plain for the
-    /// town in the middle of the west, and a highway from the west edge to the east edge that crosses the river on a bridge.
-    /// A short road leads from the highway to the gate of the reserve.
+    /// town in the middle of the west with groves of trees here and there. The highway comes in from the west edge and ends
+    /// at the first block of the town, a loop of street beside a grove where the first logging camp can go; the rest
+    /// (the bridge, the way east, the road to the reserve) is for the player to build.
     /// </summary>
     public static class CityGenerator
     {
@@ -46,23 +47,44 @@ namespace Horizonte.Simulation
                 }
             }
 
-            // Highway from the west edge to the east edge, on a bridge over the river.
-            for (int x = 0; x < width; x++) Lay(city, x, hy);
-            // Road to the gate of the reserve.
-            for (int y = hy + 1; y < city.ReserveY0; y++) Lay(city, gateX, y);
             city.GateX = gateX;
 
-            // Keep the plain where the town starts clear, so the first blocks are easy to lay out.
-            for (int y = hy - 12; y <= hy + 12; y++)
-            for (int x = width / 2 - 26; x < width / 2 + 3; x++)
+            // Groves by the entrance: one beside the first block, for the first logging camp, and one across the highway.
+            int end = EntranceEnd(width);
+            Grove(city, end + 5, hy + 5, 3.6f);
+            Grove(city, end - 9, hy - 5, 2.8f);
+
+            // The highway from the west edge, and the first block: a loop of street on its north side.
+            for (int x = 0; x <= end; x++) Lay(city, x, hy);
+            for (int y = hy + 1; y <= hy + 5; y++) { Lay(city, end, y); Lay(city, end - 6, y); }
+            for (int x = end - 5; x < end; x++) Lay(city, x, hy + 5);
+            // Room to build along the highway and inside the block.
+            for (int y = hy - 1; y <= hy + 4; y++)
+            for (int x = 0; x <= end; x++)
             {
-                if (!city.InBounds(x, y)) continue;
                 int i = city.Index(x, y);
-                if (city.Terrain[i] == Terrain.Forest) city.Terrain[i] = Terrain.Grass;
+                if (city.Building[i] == Catalog.None && city.Terrain[i] == Terrain.Forest) city.Terrain[i] = Terrain.Grass;
             }
 
             city.Refresh();
             return city;
+        }
+
+        /// <summary>Column where the highway ends and the first block begins.</summary>
+        public static int EntranceEnd(int width) => width / 2 - 12;
+
+        /// <summary>A round patch of forest with a ragged edge.</summary>
+        static void Grove(City city, int cx, int cy, float radius)
+        {
+            for (int y = cy - 5; y <= cy + 5; y++)
+            for (int x = cx - 5; x <= cx + 5; x++)
+            {
+                if (!city.InBounds(x, y)) continue;
+                int i = city.Index(x, y);
+                if (city.Terrain[i] != Terrain.Grass) continue;
+                float d = (float)Math.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)) + (Landscape.Noise(x * .5f, y * .5f, 77) - .5f) * 2;
+                if (d < radius) city.Terrain[i] = Terrain.Forest;
+            }
         }
 
         static void Lay(City city, int x, int y)

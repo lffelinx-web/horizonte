@@ -47,19 +47,16 @@ namespace Horizonte.Presentation
             Try(city, "recoleccion_basura", cx - 24, cy + 1);
             Fill(city, Houses, cx - 17, cy + 1, cx - 1, cy + 9);
 
-            // Wood: a forest station at the gate of the reserve, a sawmill beside the road to it, and a generator.
-            int gx = city.GateX, ry = city.ReserveY0;
-            Try(city, "caseta_forestal", gx - 1, ry - 1);
-            Try(city, "aserradero", gx + 1, ry - 3);
-            Try(city, "generador", gx - 1, ry - 3);
+            // Wood: a logging camp by the grove across the highway from the first block.
+            int gx = cx - 23, ry = cy - 1;
+            Try(city, "puesto_tala", gx, ry);
 
             city.IgnoreRequirements = false;
             for (int d = 0; d < 600; d++) city.Step();
             // Trees for the lumberjack, nearest first.
             var trees = new List<int>();
-            for (int y = city.ReserveY0; y <= city.ReserveY1; y++)
-            for (int x = city.ReserveX0; x <= city.ReserveX1; x++)
-                if (city.Terrain[city.Index(x, y)] == Terrain.Forest) trees.Add(city.Index(x, y));
+            for (int i = 0; i < city.Terrain.Length; i++)
+                if (city.Terrain[i] == Terrain.Forest) trees.Add(i);
             trees.Sort((a, b) => Gap(city, a, gx, ry).CompareTo(Gap(city, b, gx, ry)));
             for (int k = 0; k < trees.Count && city.Marked.Count < 5; k++) city.MarkTree(trees[k] % city.Width, trees[k] / city.Width);
             city.Money = 48_250;

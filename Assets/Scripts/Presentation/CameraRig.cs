@@ -36,7 +36,10 @@ namespace Horizonte.Presentation
             Focus.z = Mathf.Clamp(Focus.z, 0, limits.y);
         }
 
-        public void Zoom(float factor) => Distance = Mathf.Clamp(Distance * factor, MinDistance, MaxDistance);
+        /// <summary>How far the player may zoom out; it grows with the city (set by GameController).</summary>
+        public float Reach = MaxDistance;
+
+        public void Zoom(float factor) => Distance = Mathf.Clamp(Distance * factor, MinDistance, Mathf.Max(MinDistance, Reach));
 
         public void Rotate(float degrees) => Yaw = Mathf.Repeat(Yaw + degrees, 360);
 

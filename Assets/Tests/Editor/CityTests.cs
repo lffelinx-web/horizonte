@@ -267,9 +267,18 @@ namespace Horizonte.Tests
             Assert.IsTrue(city.Terrain.Contains(Terrain.Mountain), "mountains");
             Assert.IsTrue(city.Terrain.Contains(Terrain.Fertile), "fields");
             int hy = Landscape.HighwayY(city.Height);
-            // The highway crosses the whole map, over the river on a bridge.
-            for (int x = 0; x < city.Width; x++) Assert.IsTrue(city.RoadConnected[city.Index(x, hy)], $"highway at {x}");
-            Assert.IsTrue(city.Building.Contains(Catalog.Bridge));
+            // The highway comes in from the west and ends at the first block; the rest is for the player to build.
+            int end = CityGenerator.EntranceEnd(city.Width);
+            for (int x = 0; x <= end; x++) Assert.IsTrue(city.RoadConnected[city.Index(x, hy)], $"highway at {x}");
+            Assert.IsFalse(city.IsRoad(end + 1, hy));
+            Assert.IsTrue(city.RoadConnected[city.Index(end - 3, hy + 5)], "the block");
+            Assert.IsFalse(city.Building.Contains(Catalog.Bridge));
+            // A grove beside the first block for the first logging camp.
+            int near = 0;
+            for (int y = hy; y <= hy + 10; y++)
+            for (int x = end + 1; x <= end + 9; x++)
+                if (city.Terrain[city.Index(x, y)] == Terrain.Forest) near++;
+            Assert.Greater(near, 15);
             // The reserve is mostly forest, and its gate road joins the highway.
             int forest = 0, tiles = 0;
             for (int y = city.ReserveY0; y <= city.ReserveY1; y++)
@@ -279,9 +288,8 @@ namespace Horizonte.Tests
                 if (city.Terrain[city.Index(x, y)] == Terrain.Forest) forest++;
             }
             Assert.Greater(forest, tiles / 2);
-            Assert.IsTrue(city.RoadConnected[city.Index(city.GateX, city.ReserveY0 - 1)]);
-            // The plain where the town starts is clear.
-            Assert.AreEqual(Terrain.Grass, city.Terrain[city.Index(city.Width / 2 - 10, hy + 5)]);
+            // Inside the first block there is room to build.
+            Assert.AreEqual(Terrain.Grass, city.Terrain[city.Index(end - 3, hy + 2)]);
         }
 
         [Test]
@@ -388,6 +396,47 @@ namespace Horizonte.Tests
             city.Bulldoze(17, 11);
             city.StepDays(6);
             Assert.Less(city.Terrain.Count(t => t == Terrain.Stumps), stumps / 2);
+        }
+
+        [Test]
+        public void TreesAreFelledBeforeBuildingAndDoNotGrowBackOutsideTheReserve()
+        {
+            var city = Flat();
+            city.IgnoreRequirements = false;
+            for (int x = 3; x < 9; x++)
+            for (int y = 11; y < 16; y++)
+                city.Terrain[city.Index(x, y)] = Terrain.Forest;
+            Assert.AreEqual(PlaceResult.Trees, city.CanPlace(Id("casa_basica"), 4, 11));
+            Assert.IsFalse(city.Bulldoze(4, 11), "trees are not bulldozed");
+            Assert.AreEqual(FellResult.NoStation, city.MarkTree(4, 11));
+
+            // A logging camp needs no street and no power.
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Id("puesto_tala"), 10, 14));
+            Assert.AreEqual(1, Catalog.BuildTicks(Catalog.Get("puesto_tala")) / City.TicksPerHour);
+            city.FinishConstruction();
+            int camp = city.Index(10, 14);
+            Assert.IsTrue(city.Working(camp));
+            Assert.AreEqual(FellResult.Ok, city.MarkTree(4, 11));
+            int tree = city.TakeMarked(camp);
+            Assert.IsTrue(city.FellTree(tree));
+            city.Wood = 10;
+            Assert.AreEqual(PlaceResult.Ok, city.Place(Id("casa_basica"), 4, 11));
+
+            Assert.IsTrue(city.FellTree(city.Index(5, 12)));
+            city.StepDays(5);
+            Assert.AreEqual(Terrain.Stumps, city.Terrain[city.Index(5, 12)], "no regrowth outside the reserve");
+        }
+
+        [Test]
+        public void RectangularBuildingsMustFaceTheStreet()
+        {
+            var city = Flat();
+            // Along the street the duplex faces it; turned across, its front would face nothing.
+            Assert.AreEqual(PlaceResult.Ok, city.CanPlace(Id("duplex"), 2, 11));
+            Assert.AreEqual(PlaceResult.NoFront, city.CanPlace(Id("duplex"), 2, 11, true));
+            // The extended house is narrow at the front: lying along the street it would show its side.
+            Assert.AreEqual(PlaceResult.NoFront, city.CanPlace(Id("casa_ampliada"), 5, 11, true));
+            Assert.AreEqual(PlaceResult.Ok, city.CanPlace(Id("casa_ampliada"), 5, 11));
         }
     }
 }

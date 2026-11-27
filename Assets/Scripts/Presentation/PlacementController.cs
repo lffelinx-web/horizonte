@@ -245,7 +245,7 @@ namespace Horizonte.Presentation
                 if (Tool.IsFell)
                 {
                     int f = city.Index(x, y);
-                    if (!city.InReserve(x, y) || city.Terrain[f] != Simulation.Terrain.Forest || city.Marked.Contains(f)) continue;
+                    if (city.Terrain[f] != Simulation.Terrain.Forest || city.Marked.Contains(f)) continue;
                     preview.Flat(2, x0, z0, x0 + CityView.TileSize - 2 * inset, z0 + CityView.TileSize - 2 * inset, 7.5f);
                     count++;
                     continue;
@@ -253,10 +253,10 @@ namespace Horizonte.Presentation
                 if (Tool.IsBulldoze)
                 {
                     int i = city.Index(x, y);
-                    bool something = city.Building[i] != Catalog.None || city.Terrain[i] == Simulation.Terrain.Forest;
+                    bool something = city.Building[i] != Catalog.None;
                     if (!something) continue;
                     preview.Flat(2, x0, z0, x0 + CityView.TileSize - 2 * inset, z0 + CityView.TileSize - 2 * inset, lift);
-                    total += city.Building[i] != Catalog.None ? Catalog.BulldozeCost : Catalog.ClearForestCost;
+                    total += Catalog.BulldozeCost;
                     count++;
                     continue;
                 }
@@ -297,10 +297,10 @@ namespace Horizonte.Presentation
                     else if (why == FellResult.NotATree && r == FellResult.AlreadyMarked) why = r;
                 }
                 if (marked > 0) hud.Toast($"{marked} {(marked == 1 ? "árbol marcado" : "árboles marcados")} para talar");
-                else hud.Toast(why == FellResult.NoStation ? "Primero construye una caseta forestal junto a la reserva"
-                    : why == FellResult.TooFar ? "Ese árbol queda lejos de la caseta forestal"
+                else hud.Toast(why == FellResult.NoStation ? "Primero pon un puesto de tala temporal cerca de los árboles (Industria)"
+                    : why == FellResult.TooFar ? "Ese árbol queda lejos de tu puesto de tala"
                     : why == FellResult.AlreadyMarked ? "Ese árbol ya está marcado"
-                    : "Toca los árboles de la reserva forestal");
+                    : "Toca los árboles que quieras talar");
                 return;
             }
             if (Tool.IsBulldoze)
@@ -327,6 +327,8 @@ namespace Horizonte.Presentation
                 case PlaceResult.Mountain: return "No se puede construir en la montaña";
                 case PlaceResult.Reserve: return "La reserva forestal no se construye; usa Talar para sacar madera";
                 case PlaceResult.NeedsForest: return "Debe quedar junto a la reserva forestal";
+                case PlaceResult.Trees: return "Primero tala los árboles: usa Talar con un puesto de tala cerca";
+                case PlaceResult.NoFront: return "Debe quedar de frente a la calle";
                 case PlaceResult.NoWood: return $"Faltan {Tool.Def.Wood - game.City.Wood} de madera: tala árboles o espera a tu leñador";
                 default: return "Ese lugar ya está ocupado";
             }

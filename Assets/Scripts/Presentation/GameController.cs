@@ -70,15 +70,22 @@ namespace Horizonte.Presentation
         {
             City.HourPassed += Save;
             View.Init(City);
-            Traffic.Init(City, Rig);
+            Traffic.Init(City, Rig, View);
             Lumber.Init(City, View);
             Rig.Init(cam, new Vector2(City.Width, City.Height) * CityView.TileSize);
-            Rig.Focus = CityView.TileCentre(City.Width / 2 - 6, City.Height / 2);
-            Rig.Distance = 190;
+            // Start at the entrance: the highway arriving at the first block, the grove beside it, the mountains behind.
+            Rig.Focus = CityView.TileCentre(CityGenerator.EntranceEnd(City.Width) - 2, City.Height / 2 + 3);
+            Rig.Yaw = 335;
+            Rig.Distance = 170;
+            UpdateReach();
         }
+
+        /// <summary>The camera may zoom out further as the city grows: about 320 m for a village, up to 650 m for a city.</summary>
+        void UpdateReach() => Rig.Reach = Mathf.Clamp(320 + Mathf.Sqrt(City.Population) * 12, 320, CameraRig.MaxDistance);
 
         void Update()
         {
+            UpdateReach();
             clock += Time.unscaledDeltaTime * TicksPerSecond[speed];
             // Never fall more than a few ticks behind (for example after the app was in the background).
             clock = Mathf.Min(clock, 4);
@@ -283,7 +290,9 @@ namespace Horizonte.Presentation
             yield return Shot("captura_rio.png", new Vector3(City.Width * .66f * T, 0, City.Height * .5f * T), 180, 260);
 
             // The reserve: the lumberjack fells the trees marked by the demo and carries the logs back.
-            var gate = new Vector3((City.GateX + .5f) * T, 0, City.ReserveY0 * T);
+            // The logging camp by the entrance, or the gate of the reserve.
+            int camp = System.Array.FindIndex(City.Building, b => b == Catalog.Get("puesto_tala").Id);
+            var gate = camp >= 0 ? CityView.TileCentre(camp % City.Width, camp / City.Width) - new Vector3(0, 0, 25) : new Vector3((City.GateX + .5f) * T, 0, City.ReserveY0 * T);
             SetSpeed(2);
             yield return Shot("captura_tala_1.png", gate + new Vector3(0, 0, 25), 20, 95, 6);
             yield return Shot("captura_tala_2.png", gate + new Vector3(0, 0, 25), 20, 95, 10);
@@ -321,6 +330,20 @@ namespace Horizonte.Presentation
                 yield break;
             }
             SetHour(10.5f);
+            if (HasArg("-inicio"))
+            {
+                // What a new game shows: the entrance as it opens, and zoomed out as far as a village may.
+                for (int f = 0; f < 20; f++) yield return null;
+                ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_inicio.png"));
+                yield return null;
+                Rig.Zoom(10);
+                for (int f = 0; f < 20; f++) yield return null;
+                ScreenCapture.CaptureScreenshot(Path.Combine(folder, "captura_inicio_lejos.png"));
+                yield return null;
+                yield return null;
+                Application.Quit();
+                yield break;
+            }
             var shots = new[] { (yaw: 30f, dist: 190f), (yaw: 120f, dist: 90f), (yaw: 210f, dist: 410f) };
             for (int k = 0; k < shots.Length; k++)
             {
