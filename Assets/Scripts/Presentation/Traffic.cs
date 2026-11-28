@@ -15,7 +15,7 @@ namespace Horizonte.Presentation
         const int MaxWalkers = 45;
         const float WalkSpeed = 1.4f, CarSpeed = 7.5f, ReverseSpeed = 2.2f;
         /// <summary>Distance from the middle of a street to the middle of its sidewalk, and to the middle of a lane.</summary>
-        const float Kerb = 4.35f, Lane = 1.9f;
+        const float Kerb = 4.35f, Lane = 1.65f;
         const float SidewalkY = .12f, RoadY = .02f;
         /// <summary>Beyond this camera distance people and cars are too small to see and none are drawn.</summary>
         const float VisibleDistance = 330;
@@ -47,6 +47,9 @@ namespace Horizonte.Presentation
             public Trip Trip;
             /// <summary>Car park and bay, or kerb tile and side, where the car is parked; the building it came to.</summary>
             public int Lot = -1, Bay = -1, KerbTile = -1, KerbSide, Destination = -1;
+            /// <summary>The way a car parked at the kerb faces; for people, how far to the right of their path they walk.</summary>
+            public int KerbDir;
+            public float Offset;
             /// <summary>Hour it leaves (parked) or clock time it leaves (stopped); seconds it has been held up.</summary>
             public float Until, Stuck;
             /// <summary>The person walking back to the car before it leaves.</summary>
@@ -312,6 +315,9 @@ namespace Horizonte.Presentation
             m.Age = 0;
             m.Leaving = -1;
             m.Phase = Next() % 100 / 15f;
+            // Everyone keeps a little to the right, some more than others, so people meeting on the sidewalk pass each other.
+            m.Offset = .12f + Next() % 100 / 100f * .3f;
+            m.Stuck = 0;
             m.Go.transform.position = m.Points[0];
             m.Go.transform.localScale = Vector3.one;
             var heading = m.Points[1] - m.Points[0];
@@ -348,7 +354,7 @@ namespace Horizonte.Presentation
         /// <summary>Cars at most on the streets and in the car parks of the whole town, and parked at the kerb.</summary>
         const int MaxCars = 40, StreetLimit = 10;
         /// <summary>Metres from the middle of a street to a car parked at its kerb.</summary>
-        const float KerbParking = 3.05f;
+        const float KerbParking = 3.1f;
 
         /// <summary>Which bays of each car park are taken.</summary>
         readonly Dictionary<int, Mover[]> bays = new Dictionary<int, Mover[]>();
@@ -469,15 +475,38 @@ namespace Horizonte.Presentation
             }
             else if (Route(TunnelRoad, road, 70, route))
             {
+                // Pulls over on a straight stretch, never in a junction: in front of the door, or a tile or two before it,
+                // wherever the kerb is free; with no room at the kerb it stops in its lane just long enough.
+                int stop = -1, side = 0;
+                bool room = van || kerb.Count < StreetLimit;
+                for (int j = route.Count - 1; j >= Mathf.Max(1, route.Count - 4); j--)
+                {
+                    if (Junction(route[j])) continue;
+                    if (stop < 0) stop = j;
+                    int s = KerbSideOf(Step(route[j - 1], route[j]));
+                    if (!room || kerb.Contains((route[j], s))) continue;
+                    stop = j;
+                    side = s;
+                    break;
+                }
+                if (stop < 0) stop = route.Count - 1;
+                route.RemoveRange(stop + 1, route.Count - stop - 1);
+                int a = route.Count > 1 ? Step(route[route.Count - 2], route[route.Count - 1]) : 3;
+                if (side != 0) kerb.Add((route[stop], side));
+                else if (!van) TurnedAway++;
+                m.KerbSide = side;
+                m.KerbTile = route[stop];
+                m.KerbDir = a;
                 TunnelIn(m);
                 AddPath(m, route, Lane, RoadY);
-                // Pull over at the kerb on its side of the street, a little before the door.
-                int a = route.Count > 1 ? Step(route[route.Count - 2], route[route.Count - 1]) : 3;
-                int side = KerbSideOf(a);
-                if (!van && kerb.Count < StreetLimit && kerb.Add((road, side))) m.KerbSide = side;
-                else if (!van) TurnedAway++;
-                m.KerbTile = road;
-                m.Points.Add(Centre(road) + Right(a) * KerbParking - Dir(a) * 1.5f + Vector3.up * RoadY);
+                // Instead of the middle of the last tile, a gentle pull-in that ends straight, parallel to the kerb.
+                m.Points.RemoveAt(m.Points.Count - 1);
+                m.Gates.Remove(m.Points.Count);
+                var c = Centre(route[stop]) + Vector3.up * RoadY;
+                float to = side != 0 ? KerbParking : Lane;
+                m.Points.Add(c - Dir(a) * 3.2f + Right(a) * (Lane + (to - Lane) * .25f));
+                m.Points.Add(c - Dir(a) * .6f + Right(a) * to);
+                m.Points.Add(c + Dir(a) * 1.6f + Right(a) * to);
             }
             else
             {
@@ -493,7 +522,7 @@ namespace Horizonte.Presentation
         }
 
         /// <summary>Which kerb a car on a street going one way pulls over to (its right-hand side), as a sign.</summary>
-        static int KerbSideOf(int dir) => dir;
+        static int KerbSideOf(int dir) => dir + 1;
 
         /// <summary>The nearest working car park with a free bay, no more than a short walk from the destination.</summary>
         int FreeCarPark(int destination, out int bay)
@@ -565,7 +594,7 @@ namespace Horizonte.Presentation
                         m.Until = EveningLeave();
                         WalkFrom(m.Go.transform.position, m.Lot, m.Destination);
                     }
-                    else if (m.KerbSide != 0)
+                    else if (m.KerbSide != 0 && !m.Truck)
                     {
                         m.Trip = Trip.Parked;
                         m.Until = EveningLeave();
@@ -609,6 +638,7 @@ namespace Horizonte.Presentation
             m.Points.Clear();
             m.Reverse.Clear();
             m.Gates.Clear();
+            bool fromKerb = m.Lot < 0;
             m.Points.Add(m.Go.transform.position);
             int start;
             if (m.Lot >= 0)
@@ -629,7 +659,13 @@ namespace Horizonte.Presentation
                 start = m.KerbTile;
             }
             if (start < 0 || tunnel < 0 || !Route(start, tunnel, 70, route)) return false;
-            AddPath(m, route, Lane, RoadY);
+            if (fromKerb && route.Count > 1 && Step(route[0], route[1]) == m.KerbDir)
+            {
+                // Straight on from the kerb: ease back into the lane instead of going back to the middle of the tile.
+                m.Points.Add(Centre(start) + Dir(m.KerbDir) * 4.4f + Right(m.KerbDir) * Lane + Vector3.up * RoadY);
+                AddPath(m, route, Lane, RoadY, 1);
+            }
+            else AddPath(m, route, Lane, RoadY);
             TunnelOut(m);
             m.Next = 1;
             m.Trip = Trip.Out;
@@ -693,6 +729,26 @@ namespace Horizonte.Presentation
             return Launch(m) ? m : null;
         }
 
+        /// <summary>
+        /// A walk on foot from a building's door along the sidewalks to the edge of the street tile <paramref name="road"/>
+        /// that faces the lot on side <paramref name="dir"/> (the way from that lot to the street), crossing only on zebras
+        /// at junctions. Used by the lumberjacks to reach the forest beyond the streets. False if no street joins them.
+        /// </summary>
+        public bool SidewalkWay(int anchor, int road, int dir, List<Vector3> points)
+        {
+            points.Clear();
+            if (city == null || !Front(anchor, out int start, out int startDir)) return false;
+            var route = new List<int>();
+            if (!Route(start, road, 60, route)) return false;
+            var m = new Mover();
+            if (view.Door(anchor, out var door)) m.Points.Add(door);
+            m.Points.Add(Centre(start) - Dir(startDir) * Kerb + Vector3.up * SidewalkY);
+            AddWalk(m, route, SideFor(route, -Dir(startDir)), dir);
+            m.Points.Add(Centre(road) - Dir(dir) * Kerb + Vector3.up * SidewalkY);
+            points.AddRange(m.Points);
+            return true;
+        }
+
         float SideFor(List<int> route, Vector3 kerbSide) =>
             route.Count > 1 && Vector3.Dot(Right(Step(route[0], route[1])), kerbSide) < 0 ? -1 : 1;
 
@@ -717,6 +773,8 @@ namespace Horizonte.Presentation
             m.Age = 0;
             m.Leaving = -1;
             m.Phase = Next() % 100 / 15f;
+            m.Offset = .12f + Next() % 100 / 100f * .3f;
+            m.Stuck = 0;
             m.Go.transform.position = m.Points[0];
             m.Go.transform.localScale = Vector3.one;
             m.Go.SetActive(true);
@@ -781,11 +839,17 @@ namespace Horizonte.Presentation
         void Leave(int home, Garage g)
         {
             Trace("sale", home);
-            if (!Front(home, out int road, out _)) return;
+            if (!Front(home, out int road, out int front)) return;
             // Off to work: out of town through the tunnel.
             var route = new List<int>();
             bool tunnel = TunnelRoad >= 0 && Route(road, TunnelRoad, 70, route);
             if (!tunnel) Wander(road, 16 + (int)(Next() % 10), route);
+            var next = route.Count > 1 ? Step(route[0], route[1]) : (front + 1) & 3;
+            var lane = Centre(road) + Right(next) * Lane + Vector3.up * RoadY;
+            var backTo = lane - Dir(next) * 3.2f;
+            // Waits for a gap: no car about to pass where it backs out.
+            foreach (var other in Driving())
+                if (other != g.Car && (other.Go.transform.position - backTo).sqrMagnitude < 10 * 10) return;
             if (g.Car == null) g.Car = Parked(home);
             var m = g.Car;
             var (spot, driveway) = Spots(home);
@@ -794,12 +858,16 @@ namespace Horizonte.Presentation
             m.Gates.Clear();
             m.Cleared = -1;
             m.Points.Add(spot);
-            // Backs out of the garage into the street, then drives off.
+            // Backs out of the garage and round in one smooth arc until it faces the way it is going, then drives off.
             m.Points.Add(driveway);
             m.Reverse.Add(1);
-            var next = route.Count > 1 ? Step(route[0], route[1]) : 0;
-            m.Points.Add(Centre(road) + Right(next) * Lane + Vector3.up * RoadY);
-            m.Reverse.Add(2);
+            var way = Dir(front);
+            for (int k = 1; k <= 6; k++)
+            {
+                m.Points.Add(Bezier(driveway, driveway + way * 2.6f, backTo + Dir(next) * 3f, backTo, k / 6f));
+                m.Reverse.Add(m.Points.Count - 1);
+            }
+            m.Points.Add(lane);
             AddPath(m, route, Lane, RoadY, 1);
             if (tunnel) TunnelOut(m);
             m.Next = 1;
@@ -812,7 +880,7 @@ namespace Horizonte.Presentation
         void Arrive(int home, Garage g)
         {
             Trace("llega", home);
-            if (!Front(home, out int road, out _)) return;
+            if (!Front(home, out int road, out int front)) return;
             // Home from work: in through the tunnel, along the streets and into the garage.
             var route = new List<int>();
             bool tunnel = TunnelRoad >= 0 && Route(TunnelRoad, road, 70, route);
@@ -831,7 +899,16 @@ namespace Horizonte.Presentation
             if (tunnel) TunnelIn(m);
             AddPath(m, route, Lane, RoadY);
             var (spot, driveway) = Spots(home);
-            m.Points.Add(driveway);
+            // A smooth turn from its lane into the driveway, then straight into the garage.
+            int n = m.Points.Count;
+            var last = m.Points[n - 1];
+            var heading = n > 1 ? m.Points[n - 1] - m.Points[n - 2] : Dir((front + 1) & 3);
+            heading.y = 0;
+            heading = heading.sqrMagnitude > .01f ? heading.normalized : Dir((front + 1) & 3);
+            var entry = last - heading * 2.5f;
+            m.Points[n - 1] = entry;
+            m.Gates.Remove(n - 1);
+            for (int k = 1; k <= 6; k++) m.Points.Add(Bezier(entry, entry + heading * 4f, driveway + Dir(front) * 3.5f, driveway, k / 6f));
             m.Points.Add(spot);
             m.Next = 1;
             m.Age = 1;
@@ -852,6 +929,12 @@ namespace Horizonte.Presentation
             g.Car.Points.Clear();
             idleCars.Push(g.Car);
             g.Car = null;
+        }
+
+        static Vector3 Bezier(Vector3 a, Vector3 b, Vector3 c, Vector3 d, float t)
+        {
+            float u = 1 - t;
+            return u * u * u * a + 3 * u * u * t * b + 3 * u * t * t * c + t * t * t * d;
         }
 
         (Vector3 spot, Vector3 driveway) Spots(int home)
@@ -882,6 +965,8 @@ namespace Horizonte.Presentation
             var p = t.position;
             // Keep a distance from the car ahead.
             if (m.Car && Blocked(m, p, dt)) step = 0;
+            // People do not walk through the one in front of them: they slow to its pace for a moment, then pass.
+            if (!m.Car && WalkBlocked(m, p, dt)) step *= .15f;
             bool waiting = false;
             while (step > 0 && m.Next < m.Points.Count)
             {
@@ -930,7 +1015,7 @@ namespace Horizonte.Presentation
             {
                 // A light bob in step with walking.
                 m.Phase += dt * 9;
-                m.Body.localPosition = new Vector3(0, Mathf.Abs(Mathf.Sin(m.Phase)) * .06f, 0);
+                m.Body.localPosition = new Vector3(m.Offset, Mathf.Abs(Mathf.Sin(m.Phase)) * .06f, 0);
             }
             return true;
         }
@@ -1011,6 +1096,35 @@ namespace Horizonte.Presentation
                 var otherWay = other.Go.transform.forward;
                 otherWay.y = 0;
                 if (Vector3.Dot(otherWay.normalized, ahead) < .5f) continue;
+                m.Stuck += dt;
+                return true;
+            }
+            m.Stuck = 0;
+            return false;
+        }
+
+        bool WalkBlocked(Mover m, Vector3 p, float dt)
+        {
+            if (m.Stuck > 2.5f)
+            {
+                // Overtakes after a while: a step further to the side than the one in front.
+                m.Stuck = m.Stuck > 4f ? 0 : m.Stuck + dt;
+                return false;
+            }
+            var ahead = m.Go.transform.forward;
+            ahead.y = 0;
+            ahead.Normalize();
+            var right = new Vector3(ahead.z, 0, -ahead.x);
+            var me = p + right * m.Offset;
+            foreach (var other in walkers)
+            {
+                if (other == m || other.Leaving >= 0 || !other.Go.activeSelf) continue;
+                var ot = other.Go.transform;
+                var v = ot.position + ot.right * other.Offset - me;
+                v.y = 0;
+                float along = Vector3.Dot(v, ahead);
+                if (along < .15f || along > .85f || Mathf.Abs(Vector3.Dot(v, right)) > .4f) continue;
+                if (Vector3.Dot(ot.forward, ahead) < .3f) continue;
                 m.Stuck += dt;
                 return true;
             }

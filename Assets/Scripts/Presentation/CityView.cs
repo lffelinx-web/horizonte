@@ -798,6 +798,8 @@ namespace Horizonte.Presentation
         MeshFilter dropsFilter;
         readonly MeshBuilder dropsMesh = new MeshBuilder(3);
         readonly List<Vector3> poleTops = new List<Vector3>();
+        /// <summary>The street wires, each from one pole to the next, with how low it hangs in the middle.</summary>
+        readonly List<(Vector3 a, Vector3 b, float sag)> wires = new List<(Vector3, Vector3, float)>();
         float dropsAt;
         const int PoleSpacing = 3;
         const float PoleHeight = 7.4f;
@@ -822,6 +824,7 @@ namespace Horizonte.Presentation
             }
             dropsMesh.Clear();
             poleTops.Clear();
+            wires.Clear();
             for (int y = 0; y < city.Height; y++)
             for (int x = 0; x < city.Width; x++)
             {
@@ -837,7 +840,10 @@ namespace Horizonte.Presentation
                 if (!Pole(nx, ny, out var nextFoot, out bool nextNs) || nextNs != northSouth || !StraightBetween(x, y, nx, ny)) continue;
                 var nextTop = nextFoot + Vector3.up * (PoleHeight - .3f);
                 foreach (float o in new[] { -.65f, .65f })
+                {
                     Cable(top + across * o, nextTop + across * o, 1.1f);
+                    wires.Add((top + across * o, nextTop + across * o, 1.1f));
+                }
             }
 
             foreach (var kv in buildings)
@@ -857,14 +863,28 @@ namespace Horizonte.Presentation
                 dropsMesh.Box(2, wall + Vector3.up * 1.65f + front * .05f, new Vector3(.07f, attachHeight - 1.65f + .3f, .07f));
                 dropsMesh.Box(2, wall + Vector3.up * attachHeight + front * .2f, new Vector3(.06f, .06f, .06f) + Abs(front) * .4f);
                 var attach = wall + Vector3.up * (attachHeight + .03f) + front * .4f;
-                // From the nearest pole.
+                // Straight out from the street wire facing the house, so drops run side by side instead of fanning out
+                // from one pole across the neighbours' roofs; the nearest pole only where no wire runs past.
                 Vector3 best = default;
                 float bestDistance = float.MaxValue;
-                foreach (var p in poleTops)
+                foreach (var (wa, wb, sag) in wires)
                 {
-                    float d = (p - attach).sqrMagnitude;
+                    var ab = new Vector2(wb.x - wa.x, wb.z - wa.z);
+                    var ap = new Vector2(attach.x - wa.x, attach.z - wa.z);
+                    float t = Mathf.Clamp01(Vector2.Dot(ap, ab) / Mathf.Max(ab.sqrMagnitude, .01f));
+                    var p = Vector3.Lerp(wa, wb, t) + Vector3.down * sag * 4 * t * (1 - t);
+                    // Only wires the house faces: in front of it, not behind or off to the side.
+                    var to = new Vector2(p.x - attach.x, p.z - attach.z);
+                    if (Vector2.Dot(to, new Vector2(front.x, front.z)) < 0) continue;
+                    float d = to.sqrMagnitude + 4 * Mathf.Pow(Vector2.Dot(to, new Vector2(right.x, right.z)), 2);
                     if (d < bestDistance) { bestDistance = d; best = p; }
                 }
+                if (bestDistance > 22 * 22)
+                    foreach (var p in poleTops)
+                    {
+                        float d = (p - attach).sqrMagnitude;
+                        if (d < bestDistance) { bestDistance = d; best = p; }
+                    }
                 if (bestDistance > 40 * 40) continue;
                 Cable(best, attach, .5f);
             }

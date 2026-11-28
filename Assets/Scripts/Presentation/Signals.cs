@@ -27,7 +27,7 @@ namespace Horizonte.Presentation
         }
 
         City city;
-        float clock, rescan, beepAt;
+        float clock, rescan;
         readonly Dictionary<int, Junction> junctions = new Dictionary<int, Junction>();
         Material red, amber, green, off, post;
         static Mesh cube;
@@ -68,12 +68,6 @@ namespace Horizonte.Presentation
                 rescan = 2;
                 Rescan();
             }
-            // The pedestrian beep, a little over once a second, where people may cross.
-            beepAt -= Time.deltaTime;
-            bool beep = beepAt <= 0 && speedFactor > 0;
-            if (beep) beepAt = 1.1f;
-            foreach (var kv in junctions)
-                if (beep) Sound.Beep(CityView.TileCentre(kv.Key % city.Width, kv.Key / city.Width));
             foreach (var kv in junctions)
                 foreach (var (r, a, g, ns) in kv.Value.Heads)
                 {

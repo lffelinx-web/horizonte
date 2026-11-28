@@ -300,12 +300,12 @@ namespace Horizonte.Simulation
             Serve("centro_investigacion", "Centro de investigación", Category.Education, Service.Education, 40000, 1100, 5, 3, 5, 24, 10000, 10);
 
             // Health: footprints follow the real models.
-            Serve("consultorio", "Consultorio", Category.Health, Service.Health, 1200, 60, 2, 2, 1, 8, 0, 8);
-            Serve("clinica", "Clínica comunitaria", Category.Health, Service.Health, 3500, 150, 3, 2, 2, 12, 600, 10);
-            Serve("urgencias", "Centro de urgencias", Category.Health, Service.Health, 6000, 260, 3, 3, 2, 15, 1200, 8);
-            Serve("hospital_general", "Hospital general", Category.Health, Service.Health, 12000, 480, 4, 4, 6, 20, 2500, 12);
-            Serve("hospital_especializado", "Hospital especializado", Category.Health, Service.Health, 20000, 800, 5, 4, 8, 26, 6000, 15);
-            Serve("laboratorio", "Laboratorio médico", Category.Health, Service.Health, 2500, 110, 3, 2, 2, 10, 300, 6);
+            Serve("consultorio", "Consultorio", Category.Health, Service.Health, 1200, 60, 1, 1, 1, 8, 0, 8);
+            Serve("clinica", "Clínica comunitaria", Category.Health, Service.Health, 3500, 150, 2, 2, 2, 12, 600, 10);
+            Serve("urgencias", "Centro de urgencias", Category.Health, Service.Health, 6000, 260, 2, 2, 2, 15, 1200, 8);
+            Serve("hospital_general", "Hospital general", Category.Health, Service.Health, 12000, 480, 3, 3, 6, 20, 2500, 12);
+            Serve("hospital_especializado", "Hospital especializado", Category.Health, Service.Health, 20000, 800, 3, 3, 6, 26, 6000, 15);
+            Serve("laboratorio", "Laboratorio médico", Category.Health, Service.Health, 2500, 110, 2, 2, 2, 10, 300, 6);
 
             // Parks, culture and the future.
             Serve("parque_vecinal", "Parque vecinal", Category.Parks, Service.None, 150, 5, 1, 1, 0, 0, 0, 25).DesireRadius = 4;

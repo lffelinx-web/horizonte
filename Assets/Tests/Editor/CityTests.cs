@@ -109,7 +109,7 @@ namespace Horizonte.Tests
         {
             var city = Flat();
             city.Place(Id("central_termoelectrica"), 0, 11);
-            city.Place(Id("consultorio"), 6, 8);
+            city.Place(Id("consultorio"), 6, 9);
             city.Place(Id("casa_basica"), 18, 11);
             city.FinishConstruction();
             Assert.IsFalse(city.Covered(city.Index(18, 11), Service.Health), "eleven steps away, the clinic reaches eight");
@@ -122,7 +122,7 @@ namespace Horizonte.Tests
             city.Place(Id("central_termoelectrica"), 0, 11);
             city.Place(Id("casa_basica"), 4, 11);
             Assert.IsFalse(city.Covered(city.Index(4, 11), Service.Health));
-            city.Place(Id("consultorio"), 6, 8);
+            city.Place(Id("consultorio"), 6, 9);
             city.FinishConstruction();
             Assert.IsTrue(city.Covered(city.Index(4, 11), Service.Health));
         }

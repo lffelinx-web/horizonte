@@ -32,6 +32,7 @@ namespace Horizonte.Presentation
 
         City city;
         CityView view;
+        Traffic traffic;
         readonly List<Worker> workers = new List<Worker>();
         readonly Dictionary<int, GameObject> marks = new Dictionary<int, GameObject>();
         readonly List<int> stations = new List<int>();
@@ -39,10 +40,11 @@ namespace Horizonte.Presentation
         float rescan;
         static Mesh markMesh;
 
-        public void Init(City c, CityView v)
+        public void Init(City c, CityView v, Traffic t)
         {
             city = c;
             view = v;
+            traffic = t;
             foreach (Transform child in transform) Destroy(child.gameObject);
             workers.Clear();
             marks.Clear();
@@ -114,21 +116,77 @@ namespace Horizonte.Presentation
                 w.Target = Beside(w.Trees[0].At, home);
             }
             else w.Target = Beside(CityView.TileCentre(tile % city.Width, tile / city.Width), home);
-            FindWay(w, home, w.Target);
+            Plan(w, home, w.Target, true);
             workers.Add(w);
         }
 
+        readonly List<Vector3> sidewalk = new List<Vector3>();
+
         /// <summary>
-        /// The way from one point to another across the grid, never through a building (streets are fine) nor water or
-        /// mountain, as tile centres to pass. Diagonal steps only where both neighbouring tiles are open.
+        /// How a lumberjack gets between his camp and the trees. Across open ground if he can; otherwise like everyone
+        /// else in town: out of the door, along the sidewalks, over the street only on a zebra, and off the street at the
+        /// edge nearest the trees. Straight across the grid only if no street leads there.
         /// </summary>
-        void FindWay(Worker w, Vector3 from, Vector3 to)
+        void Plan(Worker w, Vector3 from, Vector3 to, bool outbound)
+        {
+            if (FindWay(w, from, to, false)) return;
+            int W = city.Width;
+            int Tile(Vector3 p) => city.Index(Mathf.Clamp(Mathf.FloorToInt(p.x / CityView.TileSize), 0, W - 1), Mathf.Clamp(Mathf.FloorToInt(p.z / CityView.TileSize), 0, city.Height - 1));
+            // Open ground spreading out from the forest end, until it touches a street the camp can walk to.
+            int forest = Tile(outbound ? to : from);
+            var toward = new Dictionary<int, int> { [forest] = -1 };
+            var open = new Queue<int>();
+            open.Enqueue(forest);
+            int tries = 0;
+            while (open.Count > 0 && tries < 8)
+            {
+                int i = open.Dequeue(), x = i % W, y = i / W;
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = x + City.DX[d], ny = y + City.DY[d];
+                    if (!city.InBounds(nx, ny)) continue;
+                    int j = city.Index(nx, ny);
+                    if (city.IsRoad(nx, ny))
+                    {
+                        // A street beside this tile: the walk ends on its sidewalk facing the tile.
+                        tries++;
+                        if (!traffic.SidewalkWay(w.Station, j, d, sidewalk)) continue;
+                        var ground = new List<Vector3>();
+                        for (int k = i; k >= 0; k = toward[k]) ground.Add(CityView.TileCentre(k % W, k / W));
+                        w.Way.Clear();
+                        if (outbound)
+                        {
+                            foreach (var p in sidewalk) w.Way.Enqueue(p);
+                            for (int k = 0; k < ground.Count - 1; k++) w.Way.Enqueue(ground[k]);
+                        }
+                        else
+                        {
+                            for (int k = ground.Count - 2; k >= 0; k--) w.Way.Enqueue(ground[k]);
+                            for (int k = sidewalk.Count - 1; k >= 0; k--) w.Way.Enqueue(sidewalk[k]);
+                        }
+                        return;
+                    }
+                    if (toward.ContainsKey(j)) continue;
+                    var terrain = city.Terrain[j];
+                    if (terrain == Simulation.Terrain.Water || terrain == Simulation.Terrain.Mountain || city.Building[j] != Catalog.None) continue;
+                    toward[j] = i;
+                    open.Enqueue(j);
+                }
+            }
+            FindWay(w, from, to, true);
+        }
+
+        /// <summary>
+        /// The way from one point to another across the grid, never through a building nor water or mountain, and over
+        /// streets only when allowed, as tile centres to pass. Diagonal steps only where both neighbouring tiles are open.
+        /// </summary>
+        bool FindWay(Worker w, Vector3 from, Vector3 to, bool streets)
         {
             w.Way.Clear();
             int W = city.Width;
             int Tile(Vector3 p) => city.Index(Mathf.Clamp(Mathf.FloorToInt(p.x / CityView.TileSize), 0, W - 1), Mathf.Clamp(Mathf.FloorToInt(p.z / CityView.TileSize), 0, city.Height - 1));
             int start = Tile(from), goal = Tile(to);
-            if (start == goal) return;
+            if (start == goal) return true;
             bool Open(int x, int y)
             {
                 if (!city.InBounds(x, y)) return false;
@@ -136,7 +194,8 @@ namespace Horizonte.Presentation
                 if (i == start || i == goal) return true;
                 var terrain = city.Terrain[i];
                 if (terrain == Simulation.Terrain.Water || terrain == Simulation.Terrain.Mountain) return false;
-                return city.Building[i] == Catalog.None || city.IsRoad(x, y) || city.Anchor[i] == w.Station;
+                if (city.IsRoad(x, y)) return streets;
+                return city.Building[i] == Catalog.None || city.Anchor[i] == w.Station;
             }
             var previous = new Dictionary<int, int> { [start] = -1 };
             var open = new Queue<int>();
@@ -155,11 +214,12 @@ namespace Horizonte.Presentation
                     open.Enqueue(j);
                 }
             }
-            if (!previous.ContainsKey(goal)) return;
+            if (!previous.ContainsKey(goal)) return false;
             var path = new List<int>();
             for (int k = previous[goal]; k >= 0 && k != start; k = previous[k]) path.Add(k);
             path.Reverse();
             foreach (int k in path) w.Way.Enqueue(CityView.TileCentre(k % W, k / W));
+            return true;
         }
 
         /// <summary>Where to stand to chop a tree: just beside it, on the side he comes from.</summary>
@@ -234,7 +294,7 @@ namespace Horizonte.Presentation
                         view.EndFelling(w.Tile);
                     }
                     w.State = State.Back;
-                    FindWay(w, t.position, w.Home);
+                    Plan(w, t.position, w.Home, false);
                     Figures.Carry(w.Go, true);
                     break;
                 case State.Back:

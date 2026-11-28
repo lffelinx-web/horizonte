@@ -45,6 +45,9 @@ namespace Horizonte.Presentation
             Try(city, "parque_vecinal", cx - 14, cy + 4);
             Try(city, "ayuntamiento", cx - 11, cy + 11);
             Try(city, "recoleccion_basura", cx - 24, cy + 1);
+            // Health care among the homes.
+            foreach (var model in new[] { "hospital_general", "clinica", "urgencias", "laboratorio" })
+                FirstFree(city, model, cx - 17, cy + 1, cx - 1, cy + 9);
             Fill(city, Houses, cx - 17, cy + 1, cx - 1, cy + 9);
 
             // A car park in the middle of town, on the first free lot by a street.
@@ -97,6 +100,13 @@ namespace Horizonte.Presentation
         static int Gap(City city, int i, int x, int y) => System.Math.Abs(i % city.Width - x) + System.Math.Abs(i / city.Width - y);
 
         static void Road(City city, IEnumerable<(int x, int y)> tiles) => city.PlaceMany(Catalog.Road, tiles, out _);
+
+        static void FirstFree(City city, string model, int x0, int y0, int x1, int y1)
+        {
+            for (int y = y0; y <= y1; y++)
+            for (int x = x0; x <= x1; x++)
+                if (city.Place(Catalog.Get(model).Id, x, y) == PlaceResult.Ok) return;
+        }
 
         static void Try(City city, string model, int x, int y) => city.Place(Catalog.Get(model).Id, x, y);
 

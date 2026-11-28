@@ -76,7 +76,7 @@ namespace Horizonte.Presentation
             City.HourPassed += Save;
             View.Init(City);
             Traffic.Init(City, Rig, View);
-            Lumber.Init(City, View);
+            Lumber.Init(City, View, Traffic);
             Signals.Init(City);
             Sound.Init(Rig);
             Rig.Init(cam, new Vector2(City.Width, City.Height) * CityView.TileSize);
@@ -412,6 +412,8 @@ namespace Horizonte.Presentation
                 // Close-ups to check that models face the street (rotation 0 faces south, toward a camera at yaw 0).
                 Hud.HideInfo();
                 yield return CloseUp(folder, "captura_casa.png", i => City.DefAt(i)?.Model == "casa_ampliada" && City.Rotation[i] == 0, 45);
+                foreach (var model in new[] { "consultorio", "clinica", "urgencias", "hospital_general", "laboratorio" })
+                    yield return CloseUp(folder, $"captura_{model}.png", i => City.DefAt(i)?.Model == model && City.Anchor[i] == i, 75);
                 yield return StreetLife(folder);
                 // A junction up close: rounded corners, zebra crossings, people crossing on them, cables to the houses.
                 SetHour(8);
