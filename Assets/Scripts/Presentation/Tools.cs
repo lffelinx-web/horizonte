@@ -139,7 +139,7 @@ namespace Horizonte.Presentation
                         : $"Demoler  ·  {CostLabel(t)}  ·  arrastra sobre lo que quieras quitar";
                 case Shape.Single:
                     var def = t.Def;
-                    string where = def.Standalone ? "cerca de los árboles" : def.NeedsForest ? "junto a la reserva forestal y a una calle" : def.NeedsWater ? "junto al río y a una calle" : "junto a una calle";
+                    string where = def.Standalone ? "cerca de los árboles" : def.NeedsForest ? "junto a la reserva forestal y a una calle" : def.Intake > 0 ? "en la orilla de un lago o del río, junto a una calle" : def.NeedsWater ? "junto al río y a una calle" : "junto a una calle";
                     return $"{def.Name}  ·  {CostLabel(t)}  ·  {def.Width} × {def.Height}  ·  toca {where}";
                 default: return null;
             }

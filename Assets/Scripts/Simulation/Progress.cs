@@ -55,7 +55,7 @@ namespace Horizonte.Simulation
             G("Abre una tienda de abarrotes", 1, c => c.Count("tienda_abarrotes")),
             G("Alcanza 50 habitantes", 50, c => c.Population),
             G("Construye una granja agrícola", 1, c => c.Count("granja_agricola")),
-            G("Construye una estación de bombeo", 1, c => c.Count("estacion_bombeo")),
+            G("Construye una toma de agua y una estación de bombeo", 2, c => System.Math.Min(1, c.Count("toma_agua")) + System.Math.Min(1, c.Count("estacion_bombeo"))),
             G("Crea 60 empleos", 60, c => c.Jobs),
             G("Construye un consultorio", 1, c => c.Count("consultorio")),
             G("Construye un puesto de policía", 1, c => c.Count("puesto_policia")),

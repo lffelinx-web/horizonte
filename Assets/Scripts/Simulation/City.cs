@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace Horizonte.Simulation
 {
-    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked, NoRoad, NeedsWater, Mountain, Reserve, NoWood, NeedsForest, Trees, NoFront, CampLimit }
+    public enum PlaceResult { Ok, OutOfBounds, Occupied, Water, NoMoney, Locked, NoRoad, NeedsWater, Mountain, Reserve, NoWood, NeedsForest, Trees, NoFront, CampLimit, Lake }
 
     /// <summary>What happens when the player marks a tree to be felled.</summary>
     public enum FellResult { Ok, NotATree, NoStation, TooFar, AlreadyMarked, Busy }
@@ -15,7 +15,7 @@ namespace Horizonte.Simulation
     /// factories offer jobs, plants feed the grid and services cover the homes around them.
     /// Grid coordinates: x grows east, y grows north. Index = y * Width + x.
     /// </summary>
-    public sealed class City
+    public sealed partial class City
     {
         public const int TicksPerHour = 12, HoursPerDay = 24, TicksPerDay = TicksPerHour * HoursPerDay;
         /// <summary>Taxes and upkeep are settled every day at six in the morning.</summary>
@@ -126,6 +126,7 @@ namespace Horizonte.Simulation
             PowerCover = new bool[n];
             Desirability = new int[n];
             Coverage = new ushort[n];
+            AllocateLakes();
             for (int i = 0; i < n; i++) Anchor[i] = -1;
             RngState = seed == 0 ? 1u : seed;
             Money = StartMoney;
@@ -204,7 +205,7 @@ namespace Horizonte.Simulation
             if (!IgnoreRequirements && Population < def.MinPopulation) return PlaceResult.Locked;
             // One logging camp per lumberjack.
             if (def.Standalone && def.LumberReach > 0 && !IgnoreRequirements && Count(d => d.Standalone && d.LumberReach > 0) >= Lumberjacks) return PlaceResult.CampLimit;
-            bool mountain = false, reserve = false, trees = false;
+            bool mountain = false, reserve = false, trees = false, lakebed = false;
             for (int dy = 0; dy < fh; dy++)
             for (int dx = 0; dx < fw; dx++)
             {
@@ -215,6 +216,7 @@ namespace Horizonte.Simulation
                 mountain |= Terrain[i] == Simulation.Terrain.Mountain;
                 reserve |= InReserve(x + dx, y + dy);
                 trees |= IsTree(Terrain[i]);
+                lakebed |= Terrain[i] == Simulation.Terrain.Lakebed && !LakebedFree(i);
                 if (Building[i] == Catalog.None) continue;
                 // A street can be rebuilt as an avenue and back.
                 var there = DefAt(i);
@@ -222,6 +224,7 @@ namespace Horizonte.Simulation
                 if (!reroad) return PlaceResult.Occupied;
             }
             if (mountain) return PlaceResult.Mountain;
+            if (lakebed) return PlaceResult.Lake;
             if (reserve) return PlaceResult.Reserve;
             // Trees have to be felled first (which gives their wood); showcases and tests clear them.
             if (trees && !IgnoreRequirements) return PlaceResult.Trees;
@@ -270,6 +273,7 @@ namespace Horizonte.Simulation
             {
                 int i = Index(x + dx, y + dy);
                 if (IsTree(Terrain[i]) || Terrain[i] == Simulation.Terrain.Stumps) Terrain[i] = Simulation.Terrain.Grass;
+                if (LakeOf[i] > 0 && !def.Bridge) LeaveLake(i);
                 Building[i] = id;
                 Anchor[i] = anchor;
                 Occupants[i] = 0;
@@ -967,6 +971,8 @@ namespace Horizonte.Simulation
         }
 
         readonly int[] utilitySupply = new int[16], utilityDemand = new int[16];
+        /// <summary>Some pumping station or plant has no water intake on its streets, so it gives no water.</summary>
+        public bool MissingIntake { get; private set; }
         readonly HashSet<int>[] utilityNets = new HashSet<int>[16];
 
         /// <summary>Whether a street network has a working water, sewage or waste plant on it.</summary>
@@ -998,6 +1004,30 @@ namespace Horizonte.Simulation
                 RoadsAround(i, around);
                 sources.AddRange(around);
             }
+            // Water has to come from somewhere: pumps and plants give no more than the intakes on their streets draw
+            // from the river and the lakes.
+            var intakes = new Dictionary<int, List<(int anchor, int yield)>>();
+            if (s == Service.Water)
+            {
+                foreach (var lake in Lakes) lake.Draw = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    if (Anchor[i] != i || buildingNet[i] < 0) continue;
+                    int yield = IntakeYield(i);
+                    if (yield <= 0) continue;
+                    if (!intakes.TryGetValue(buildingNet[i], out var list)) intakes[buildingNet[i]] = list = new List<(int, int)>();
+                    list.Add((i, yield));
+                }
+                supply = 0;
+                foreach (var net in new List<int>(capacityOf.Keys))
+                {
+                    int drawn = 0;
+                    if (intakes.TryGetValue(net, out var list)) foreach (var (_, y) in list) drawn += y;
+                    capacityOf[net] = Math.Min(capacityOf[net], drawn);
+                    supply += capacityOf[net];
+                }
+            }
+            var offered = new Dictionary<int, int>(capacityOf);
             var dist = StreetDistance(sources);
             var consumers = new List<(int d, int anchor, int use)>();
             for (int i = 0; i < n; i++)
@@ -1024,6 +1054,23 @@ namespace Horizonte.Simulation
                 for (int dx = 0; dx < cw; dx++)
                     Coverage[Index(ax + dx, ay + dy)] |= bit;
             }
+            if (s == Service.Water)
+            {
+                // What the town used comes out of the lakes, shared among the intakes of each network by what they draw.
+                MissingIntake = false;
+                foreach (var kv in offered)
+                {
+                    if (!intakes.TryGetValue(kv.Key, out var list)) { MissingIntake = true; continue; }
+                    int used = kv.Value - capacityOf[kv.Key], total = 0;
+                    foreach (var (_, y) in list) total += y;
+                    foreach (var (a, y) in list)
+                    {
+                        int source = SourceOf(a);
+                        if (source > 0) Lakes[source - 1].Draw += used * (float)y / Math.Max(1, total);
+                    }
+                }
+                foreach (var kv in offered) if (kv.Value <= 0) capacityOf.Remove(kv.Key);
+            }
             utilityNets[(int)s] = new HashSet<int>(capacityOf.Keys);
             utilitySupply[(int)s] = supply;
             utilityDemand[(int)s] = demand;
@@ -1044,6 +1091,7 @@ namespace Horizonte.Simulation
             FinishSawmillJobs();
             if (Tick % TicksPerHour == 0)
             {
+                UpdateLakes();
                 Regrow();
                 RunSawmills();
                 HourPassed?.Invoke();

@@ -178,6 +178,15 @@ namespace Horizonte.Presentation
                 b.Box(Accent, new Vector3(-w * .15f, 0, .4f - d * .3f - .05f), new Vector3(.9f, 2f, .1f));
                 Windows(b, new Vector3(0, 0, .4f), w * .7f, d * .6f, h, def.Floors, 1.6f);
             }
+            else if (def.Intake > 0)
+            {
+                // Water intake: a small pump house with a pipe out of its side (the jetty over the water is added on site).
+                b.Box(Wall, new Vector3(0, 0, .5f), new Vector3(4.2f, 3f, 3.6f));
+                b.Box(Roof, new Vector3(0, 3f, .5f), new Vector3(4.6f, .3f, 4f));
+                b.Box(Accent, new Vector3(-1f, 0, .5f - 1.85f), new Vector3(1f, 2.1f, .1f));
+                b.Box(Glass, new Vector3(1f, 1.2f, .5f - 1.85f), new Vector3(1.2f, .8f, .1f));
+                b.Cylinder(Roof, new Vector3(1.4f, 3.3f, 1.2f), .3f, .9f, 8);
+            }
             else if (def.Kind == Kind.Power && def.PowerSupply == 0)
             {
                 // Substation: a small hut and pylons.

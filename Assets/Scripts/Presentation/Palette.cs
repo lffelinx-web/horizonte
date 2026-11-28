@@ -32,6 +32,7 @@ namespace Horizonte.Presentation
             new Entry("ForestFloor", "#628744", .05f),
             new Entry("Bank", "#8C7556", .05f),
             new Entry("Water", "#3F7FA6", .92f),
+            new Entry("Lakebed", "#A8916B", .04f),
             new Entry("Asphalt", "#3B3D42", .2f),
             new Entry("Sidewalk", "#C9C4B8", .1f),
             new Entry("LaneLine", "#E8E2C8", .2f),
@@ -81,7 +82,7 @@ namespace Horizonte.Presentation
                 foreach (var e in Entries) if (e.Name == name) m = Create(e);
                 if (m == null) throw new KeyNotFoundException($"Material {name} is not in the palette.");
             }
-            if (name == "Grass" || name == "ForestFloor" || name == "Yard" || name == "Sidewalk" || name == "Asphalt" || name == "Bank")
+            if (name == "Grass" || name == "ForestFloor" || name == "Yard" || name == "Sidewalk" || name == "Asphalt" || name == "Bank" || name == "Lakebed")
             {
                 m = new Material(m) { name = name };
                 // Grass gets broad patches of lusher and drier green; paving only a fine grain.

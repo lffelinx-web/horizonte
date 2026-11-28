@@ -3,7 +3,7 @@ using System.Collections.Generic;
 namespace Horizonte.Simulation
 {
     /// <summary>Ground of a tile. Stumps and saplings are felled forest growing back; mountains cannot be built on.</summary>
-    public enum Terrain : byte { Grass, Water, Forest, Mountain, Fertile, Stumps, Sapling }
+    public enum Terrain : byte { Grass, Water, Forest, Mountain, Fertile, Stumps, Sapling, Lakebed }
 
     /// <summary>Groups on the building bar, in the order of the concept sheets.</summary>
     public enum Category : byte { Transport, Housing, Commerce, Industry, Energy, Water, Safety, Education, Health, Parks }
@@ -49,8 +49,10 @@ namespace Horizonte.Simulation
         public int DesireRadius;
         /// <summary>Satisfaction added to the whole city (town hall and similar).</summary>
         public int CityBonus;
-        /// <summary>Must stand on the river bank (hydroelectric dam).</summary>
+        /// <summary>Must stand on the bank of the river or a lake (hydroelectric dam, water intake).</summary>
         public bool NeedsWater;
+        /// <summary>Water it can draw from the river or a lake a day (water intake); pumps need one on their streets.</summary>
+        public int Intake;
         /// <summary>Road that can be laid over water.</summary>
         public bool Bridge;
         /// <summary>Wood used to build it, besides the money.</summary>
@@ -247,6 +249,12 @@ namespace Horizonte.Simulation
             Plant("red_inteligente", "Centro de red inteligente", 15000, 300, 2, 2, 3, 300, 16, 4000);
 
             // Water, sanitation and waste.
+            // The intake on the bank draws the water; pumping stations and plants on its streets send it to the town.
+            var intake = Serve("toma_agua", "Toma de agua", Category.Water, Service.None, 500, 20, 1, 1, 1, 0, 0, 0);
+            intake.NeedsWater = true;
+            intake.Intake = 250;
+            intake.PowerUse = 1;
+            intake.Summary = "Saca 250 m³ al día de un lago o del río";
             Serve("estacion_bombeo", "Estación de bombeo", Category.Water, Service.Water, 1200, 50, 1, 1, 1, 9);
             Serve("planta_potabilizadora", "Planta potabilizadora", Category.Water, Service.Water, 8000, 280, 2, 2, 2, 22, 1000);
             Serve("tanque_agua", "Tanque de almacenamiento", Category.Water, Service.Water, 3000, 90, 2, 2, 3, 13, 400);
@@ -363,6 +371,7 @@ namespace Horizonte.Simulation
         public static int Use(BuildingDef d, Service s, int occupants)
         {
             if (d == null || d.IsRoad || d.Service == s) return 0;
+            if (d.Intake > 0) return 0;
             bool waste = s == Service.Waste;
             switch (d.Kind)
             {

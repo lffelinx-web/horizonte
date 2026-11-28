@@ -384,8 +384,19 @@ namespace Horizonte.Presentation
 
                 // Health care up close by day, textures and see-through glass.
                 Hud.HideInfo();
-                foreach (var model in new[] { "consultorio", "clinica", "urgencias", "hospital_general", "laboratorio" })
-                    yield return CloseUp(folder, $"captura_{model}.png", i => City.DefAt(i)?.Model == model && City.Anchor[i] == i, model == "consultorio" ? 38 : 70);
+                foreach (var model in new[] { "toma_agua", "consultorio", "clinica", "urgencias", "hospital_general", "laboratorio" })
+                    yield return CloseUp(folder, $"captura_{model}.png", i => City.DefAt(i)?.Model == model && City.Anchor[i] == i, model == "consultorio" ? 38 : model == "toma_agua" ? 60 : 70);
+
+                // The big lake drawn down to a third: the shore dried out, the middle still under water.
+                if (City.Lakes.Count > 0)
+                {
+                    var volumes = City.Lakes.ConvertAll(l => l.Volume).ToArray();
+                    volumes[0] = City.Lakes[0].Capacity * .3f;
+                    City.RebuildLakes(volumes);
+                    yield return CloseUp(folder, "captura_lago_bajo.png", i => City.DefAt(i)?.Model == "toma_agua", 110);
+                    volumes[0] = City.Lakes[0].Capacity;
+                    City.RebuildLakes(volumes);
+                }
 
                 // A building going up: the lot, the frame rising, and the finished building inside the scaffold.
                 City.IgnoreRequirements = true;

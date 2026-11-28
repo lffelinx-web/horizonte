@@ -148,6 +148,9 @@ namespace Horizonte.Tests
             var city = Flat();
             city.Place(Id("central_termoelectrica"), 0, 11);
             city.Place(Id("estacion_bombeo"), 4, 9);
+            // The pump needs an intake on its streets: one on the bank of a bit of river south of the street.
+            city.Terrain[city.Index(14, 8)] = Terrain.Water;
+            city.Place(Id("toma_agua"), 14, 9);
             city.Place(Id("casa_basica"), 5, 11);
             city.Place(Id("torre_residencial"), 8, 11);
             city.FinishConstruction();

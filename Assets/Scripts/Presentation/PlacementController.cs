@@ -337,7 +337,8 @@ namespace Horizonte.Presentation
                 case PlaceResult.OutOfBounds: return "Fuera del terreno de la ciudad";
                 case PlaceResult.Locked: return $"Se desbloquea con {Hud.N(Tool.Def.MinPopulation)} habitantes";
                 case PlaceResult.NoRoad: return "Debe quedar junto a una calle";
-                case PlaceResult.NeedsWater: return "Debe quedar junto al río";
+                case PlaceResult.NeedsWater: return Tool.Def != null && Tool.Def.Intake > 0 ? "Debe quedar en la orilla de un lago o del río" : "Debe quedar junto al río";
+                case PlaceResult.Lake: return "El lago todavía tiene agua: su lecho se construye cuando se seque por completo";
                 case PlaceResult.Mountain: return "No se puede construir en la montaña";
                 case PlaceResult.Reserve: return "La reserva forestal no se construye; usa Talar para sacar madera";
                 case PlaceResult.NeedsForest: return "Debe quedar junto a la reserva forestal";

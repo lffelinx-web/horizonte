@@ -49,6 +49,7 @@ namespace Horizonte.Simulation
             }
 
             city.GateX = gateX;
+            AddLakes(city, seed);
 
             // The highway out of the tunnel, a few tiles into the map, and a small clearing on both sides of its end.
             int end = EntranceEnd(width);
@@ -63,6 +64,42 @@ namespace Horizonte.Simulation
 
             city.Refresh();
             return city;
+        }
+
+        /// <summary>
+        /// Three lakes in natural shapes: a big one in the forest south-west of the entrance, near where the town grows,
+        /// a small one at the foot of the mountains and another among the fields across the river. Deep in the middle,
+        /// shallow at the shore; never on the mountain, the reserve, the river banks or the highway.
+        /// </summary>
+        static void AddLakes(City city, uint seed)
+        {
+            int w = city.Width, h = city.Height, hy = Landscape.HighwayY(h);
+            var lakes = new[] { (x: w * .2f, y: h * .22f, r: 5.6f), (x: w * .47f, y: h * .74f, r: 3.1f), (x: w * .84f, y: h * .2f, r: 3.3f) };
+            byte id = 0;
+            foreach (var (cx0, cy0, r) in lakes)
+            {
+                id++;
+                // A little different on every map.
+                float cx = cx0 + (Landscape.Noise(id * 3.1f, 0, seed + 41) - .5f) * 4, cy = cy0 + (Landscape.Noise(0, id * 3.1f, seed + 43) - .5f) * 4;
+                for (int y = (int)(cy - r * 1.5f); y <= cy + r * 1.5f; y++)
+                for (int x = (int)(cx - r * 1.5f); x <= cx + r * 1.5f; x++)
+                {
+                    if (x < 6 || y < 2 || x >= w - 2 || y >= h - 2 || Math.Abs(y - hy) <= 2) continue;
+                    int i = city.Index(x, y);
+                    var t = city.Terrain[i];
+                    if (t == Terrain.Water || t == Terrain.Mountain || city.InReserve(x, y)) continue;
+                    if (Math.Abs(x + .5f - Landscape.RiverX(seed, w, y + .5f)) < Landscape.RiverHalfWidth(seed, y + .5f) + 3) continue;
+                    float dx = x + .5f - cx, dy = y + .5f - cy;
+                    float d = (float)Math.Sqrt(dx * dx + dy * dy) / r;
+                    float edge = 1 + (Landscape.Noise(x * .35f, y * .35f, seed + 50 + id) - .5f) * .7f;
+                    if (d >= edge) continue;
+                    float depth = .4f + 3.2f * (float)Math.Pow(1 - d / edge, .8);
+                    city.Terrain[i] = Terrain.Water;
+                    city.LakeOf[i] = id;
+                    city.LakeDepth[i] = (byte)Math.Round(depth * 10);
+                }
+            }
+            city.RebuildLakes();
         }
 
         /// <summary>Column where the highway ends and the first block begins.</summary>

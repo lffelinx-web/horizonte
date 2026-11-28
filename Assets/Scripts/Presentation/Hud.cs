@@ -616,6 +616,12 @@ namespace Horizonte.Presentation
                 int missing = 100 - c.ServiceCoverage(s);
                 if (missing > 30) alerts.Add($"{missing} % de los habitantes sin {Catalog.ServiceName(s).ToLowerInvariant()}.");
             }
+            if (c.MissingIntake) alerts.Add("Una estación de bombeo no tiene toma de agua en sus calles: construye una toma a la orilla de un lago o del río.");
+            foreach (var lake in c.Lakes)
+            {
+                if (lake.Dry && lake.Draw > 0) alerts.Add($"El lago {lake.Id} se secó: sus tomas no dan agua hasta que se recupere.");
+                else if (lake.Level < .25f && lake.Draw > lake.Inflow) alerts.Add($"El lago {lake.Id} está al {Mathf.RoundToInt(lake.Level * 100)} % y sigue bajando.");
+            }
             if (c.Workers > c.Jobs + 10) alerts.Add($"Faltan empleos: {N(c.Workers - c.Jobs)} personas buscan trabajo.");
             if (isolated > 0) alerts.Add($"{N(isolated)} {(isolated == 1 ? "tramo" : "tramos")} de calle sin salida a la carretera.");
             if (c.Money < 0) alerts.Add("La tesorería está en números rojos.");
@@ -680,6 +686,7 @@ namespace Horizonte.Presentation
                     switch (c.Terrain[i])
                     {
                         case Terrain.Water: col = water; break;
+                        case Terrain.Lakebed: col = new Color(.5f, .43f, .31f); break;
                         case Terrain.Forest: case Terrain.Sapling: col = forest; break;
                         case Terrain.Mountain: col = new Color(.45f, .43f, .4f); break;
                         case Terrain.Fertile: col = new Color(.46f, .47f, .25f); break;
@@ -976,12 +983,32 @@ namespace Horizonte.Presentation
                 string icon = "explore";
                 switch (t)
                 {
-                    case Terrain.Water:
+                    case Terrain.Water when c.LakeAt(i) == null:
                         infoTitle.text = "Río";
-                        infoSubtitle.text = "Solo se cruza con un puente";
+                        infoSubtitle.text = "Nunca se seca · pon una toma de agua en su orilla";
                         infoTile.color = new Color(.2f, .48f, .72f);
                         icon = "water";
                         break;
+                    case Terrain.Water:
+                    case Terrain.Lakebed:
+                    {
+                        var lake = c.LakeAt(i);
+                        bool wet = t == Terrain.Water;
+                        infoTitle.text = lake == null ? "Lecho seco" : $"Lago {lake.Id}";
+                        infoSubtitle.text = lake == null ? "Terreno" : lake.Dry ? "Seco · ya se puede construir en su lecho"
+                            : wet ? "Pon una toma de agua en su orilla" : "Orilla seca · se puede construir cuando todo el lago se seque";
+                        infoTile.color = wet ? new Color(.2f, .48f, .72f) : new Color(.55f, .46f, .32f);
+                        icon = "water";
+                        if (lake == null) break;
+                        AddCard("water", new Color(.45f, .7f, 1f), "Nivel", $"{Mathf.RoundToInt(lake.Level * 100)} %",
+                            lake.Level < .25f ? UiKit.Bad : lake.Level < .6f ? UiKit.Warn : UiKit.Good);
+                        AddCard("water", new Color(.45f, .7f, 1f), "Se recarga", $"{N(Mathf.RoundToInt(lake.Inflow))} m³/día", Color.white);
+                        AddCard("water", new Color(.45f, .7f, 1f), "Se extrae", $"{N(Mathf.RoundToInt(lake.Draw))} m³/día", lake.Draw > lake.Inflow ? UiKit.Warn : Color.white);
+                        float days = lake.DaysLeft;
+                        AddCard("water", new Color(.45f, .7f, 1f), "Le queda", lake.Dry ? "Seco" : days < 0 ? "No baja" : $"{Mathf.Max(1, Mathf.RoundToInt(days))} días",
+                            lake.Dry || (days >= 0 && days < 5) ? UiKit.Bad : Color.white);
+                        break;
+                    }
                     case Terrain.Mountain:
                         infoTitle.text = "Montaña";
                         infoSubtitle.text = "No se puede construir · más adelante, minas";
@@ -1020,7 +1047,7 @@ namespace Horizonte.Presentation
                 }
                 infoIcon.sprite = Icons.Get(icon);
                 AddCard("star", UiKit.Gold, "Atractivo", Signed(desire), desireColor);
-                if (t != Terrain.Water && t != Terrain.Mountain)
+                if (t != Terrain.Water && t != Terrain.Mountain && t != Terrain.Lakebed)
                 {
                     var (power, powerColor) = YesNo(c.PowerCover[i]);
                     AddCard("bolt", UiKit.Warn, "Red eléctrica", power, powerColor);
@@ -1087,6 +1114,14 @@ namespace Horizonte.Presentation
                             AddCard("radius", blue, "Alcance", $"{def.Radius} casillas", Color.white);
                             int coverage = c.ServiceCoverage(def.Service);
                             AddCard("people", blue, "Cobertura", $"{coverage} %", Color.white, coverage / 100f);
+                        }
+                        else if (def.Intake > 0)
+                        {
+                            int source = c.SourceOf(a), yield = c.IntakeYield(a);
+                            var from = source > 0 ? c.Lakes[source - 1] : null;
+                            AddCard("water", new Color(.45f, .7f, 1f), "Saca de", source < 0 ? "Sin agua" : from == null ? "El río" : $"Lago {from.Id}", source < 0 ? UiKit.Bad : Color.white);
+                            AddCard("water", new Color(.45f, .7f, 1f), "Puede sacar", $"{N(yield)} m³/día", yield > 0 ? Color.white : UiKit.Bad);
+                            if (from != null) AddCard("chart", blue, "Nivel del lago", $"{Mathf.RoundToInt(from.Level * 100)} %", from.Level < .25f ? UiKit.Bad : Color.white, from.Level);
                         }
                         else AddCard("star", UiKit.Gold, def.CityBonus > 0 ? "Satisfacción" : "Atractivo", def.CityBonus > 0 ? $"+{def.CityBonus}" : Signed(def.Desirability), UiKit.Good);
                         AddCard("bolt", UiKit.Warn, "Electricidad", power, powerColor);

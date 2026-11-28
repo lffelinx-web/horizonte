@@ -17,8 +17,8 @@ namespace Horizonte.Presentation
 
         // Ground slots, in material order.
         const int SGrass = 0, SForest = 1, SBank = 2, SAsphalt = 3, SSidewalk = 4, SLine = 5, SZoneR = 6, SZoneC = 7, SZoneI = 8, SYard = 9, STrunk = 10, SLeaves = 11, SLamp = 12, SGlow = 13;
-        const int SLeavesLight = 14, SField = 15, SFieldRow = 16, SCut = 17;
-        static readonly string[] GroundMaterials = { "Grass", "ForestFloor", "Bank", "Asphalt", "Sidewalk", "LaneLine", "ZoneResidential", "ZoneCommercial", "ZoneIndustrial", "Yard", "Trunk", "Leaves", "StreetLamp", "LampGlow", "LeavesLight", "Field", "FieldRow", "StumpCut" };
+        const int SLeavesLight = 14, SField = 15, SFieldRow = 16, SCut = 17, SDry = 18;
+        static readonly string[] GroundMaterials = { "Grass", "ForestFloor", "Bank", "Asphalt", "Sidewalk", "LaneLine", "ZoneResidential", "ZoneCommercial", "ZoneIndustrial", "Yard", "Trunk", "Leaves", "StreetLamp", "LampGlow", "LeavesLight", "Field", "FieldRow", "StumpCut", "Lakebed" };
 
         /// <summary>Terrain last drawn on each tile, to notice trees being felled.</summary>
         Simulation.Terrain[] drawnTerrain;
@@ -217,9 +217,21 @@ namespace Horizonte.Presentation
         {
             float w = city.Width * TileSize, h = city.Height * TileSize;
             const float margin = 1200;
+            // The river, tile by tile (running on a little past the edge of the map); the lakes have their own surfaces,
+            // which go down as they are drawn.
             var water = new MeshBuilder(1);
-            water.Flat(0, -2, -2, w + 2, h + 2, WaterLevel);
+            for (int y = 0; y < city.Height; y++)
+            for (int x = 0; x < city.Width; x++)
+            {
+                int i = city.Index(x, y);
+                if (city.Terrain[i] != Simulation.Terrain.Water || city.LakeOf[i] > 0) continue;
+                float x0 = x * TileSize - (x == 0 ? 2 : 0), z0 = y * TileSize - (y == 0 ? 2 : 0);
+                float x1 = (x + 1) * TileSize + (x == city.Width - 1 ? 2 : 0), z1 = (y + 1) * TileSize + (y == city.Height - 1 ? 2 : 0);
+                water.Flat(0, x0, z0, x1, z1, WaterLevel);
+            }
             AddStatic("Agua", water, Palette.Get("Water"));
+            foreach (var surface in lakeSurfaces.Values) if (surface.filter != null) Destroy(surface.filter.gameObject);
+            lakeSurfaces.Clear();
 
             var land = new MeshBuilder(1);
             land.Flat(0, -margin, -margin, w + margin, 0, 0);
@@ -338,13 +350,16 @@ namespace Horizonte.Presentation
             float x0 = x * TileSize, z0 = y * TileSize, x1 = x0 + TileSize, z1 = z0 + TileSize;
             var terrain = city.Terrain[i];
             var def = city.DefAt(i);
-            if (terrain == Simulation.Terrain.Water)
+            if (terrain == Simulation.Terrain.Water || city.LakeOf[i] > 0)
             {
-                builder.Flat(SBank, x0, z0, x1, z1, WaterLevel - 1.2f);
+                // River bed, or a lake bed: under water, or dry and cracked once the lake has drawn back from it.
+                float bed = Ground(x, y);
+                builder.Flat(terrain == Simulation.Terrain.Lakebed ? SDry : SBank, x0, z0, x1, z1, bed);
+                Banks(x, y, x0, z0, x1, z1, bed);
                 if (def == null || !def.Bridge) return;
                 // Bridge: a deck at street level on two piers.
                 builder.Box(SSidewalk, new Vector3(x0 + TileSize * .5f, -.7f, z0 + TileSize * .5f), new Vector3(TileSize, .7f, TileSize));
-                builder.Box(SSidewalk, new Vector3(x0 + TileSize * .5f, WaterLevel - 1.2f, z0 + TileSize * .5f), new Vector3(1.6f, -WaterLevel + .5f, 1.6f));
+                builder.Box(SSidewalk, new Vector3(x0 + TileSize * .5f, bed, z0 + TileSize * .5f), new Vector3(1.6f, -bed - .2f, 1.6f));
                 BuildRoad(x, y, x0, z0, false);
                 return;
             }
@@ -374,18 +389,42 @@ namespace Horizonte.Presentation
                 else if (def.Floors > 0 && !factory.HasModel(def)) builder.Flat(SSidewalk, x0, z0, x1, z1, .03f);
             }
 
-            // River banks: earth walls down to the water where land meets it.
+            Banks(x, y, x0, z0, x1, z1, 0);
+        }
+
+        /// <summary>
+        /// Height of the ground of a tile: zero on land, the river bed below the river, and on a lake the bed of that
+        /// tile, deeper toward the middle.
+        /// </summary>
+        float Ground(int x, int y)
+        {
+            if (!city.InBounds(x, y)) return 0;
+            int i = city.Index(x, y);
+            if (city.LakeOf[i] > 0) return LakeBed(i);
+            return city.Terrain[i] == Simulation.Terrain.Water ? WaterLevel - 1.2f : 0;
+        }
+
+        float LakeBed(int i) => WaterLevel - city.LakeDepth[i] / 10f * LakeScale;
+
+        /// <summary>Metres drawn per metre of lake depth (the basins are shown a little shallower than they are).</summary>
+        const float LakeScale = .55f;
+
+        /// <summary>Earth walls down from this tile to any neighbour whose ground is lower: river banks, lake shores, steps in a lake bed.</summary>
+        void Banks(int x, int y, float x0, float z0, float x1, float z1, float top)
+        {
             for (int d = 0; d < 4; d++)
             {
                 int nx = x + City.DX[d], ny = y + City.DY[d];
-                if (!city.InBounds(nx, ny) || city.Terrain[city.Index(nx, ny)] != Simulation.Terrain.Water) continue;
-                float bottom = WaterLevel - 1.2f;
+                if (!city.InBounds(nx, ny)) continue;
+                float bottom = Ground(nx, ny);
+                if (bottom > top - .01f) continue;
+                int slot = city.Terrain[city.Index(x, y)] == Simulation.Terrain.Lakebed ? SDry : SBank;
                 switch (d)
                 {
-                    case 0: builder.Quad(SBank, new Vector3(x0, bottom, z0), new Vector3(x1, bottom, z0), new Vector3(x1, 0, z0), new Vector3(x0, 0, z0)); break;
-                    case 1: builder.Quad(SBank, new Vector3(x0, bottom, z1), new Vector3(x0, bottom, z0), new Vector3(x0, 0, z0), new Vector3(x0, 0, z1)); break;
-                    case 2: builder.Quad(SBank, new Vector3(x1, bottom, z1), new Vector3(x0, bottom, z1), new Vector3(x0, 0, z1), new Vector3(x1, 0, z1)); break;
-                    case 3: builder.Quad(SBank, new Vector3(x1, bottom, z0), new Vector3(x1, bottom, z1), new Vector3(x1, 0, z1), new Vector3(x1, 0, z0)); break;
+                    case 0: builder.Quad(slot, new Vector3(x0, bottom, z0), new Vector3(x1, bottom, z0), new Vector3(x1, top, z0), new Vector3(x0, top, z0)); break;
+                    case 1: builder.Quad(slot, new Vector3(x0, bottom, z1), new Vector3(x0, bottom, z0), new Vector3(x0, top, z0), new Vector3(x0, top, z1)); break;
+                    case 2: builder.Quad(slot, new Vector3(x1, bottom, z1), new Vector3(x0, bottom, z1), new Vector3(x0, top, z1), new Vector3(x1, top, z1)); break;
+                    case 3: builder.Quad(slot, new Vector3(x1, bottom, z0), new Vector3(x1, bottom, z1), new Vector3(x1, top, z1), new Vector3(x1, top, z0)); break;
                 }
             }
         }
@@ -759,6 +798,7 @@ namespace Horizonte.Presentation
             // A few centimetres up so the lot drawn in the model covers the ground underneath.
             go.transform.localPosition = new Vector3((x + w * .5f) * TileSize, .05f, (y + h * .5f) * TileSize);
             buildings[i] = go;
+            if (def.Intake > 0) Pier(go, x, y);
             if (city.Construction[i] > 0) sites[i] = ConstructionSite.Create(buildingRoot, go, Hash(x, y), w * TileSize, h * TileSize, def.Floors);
             if (layer != Layer.None) Tint(i, go);
         }
@@ -786,8 +826,82 @@ namespace Horizonte.Presentation
             RefreshLayer();
         }
 
+        /// <summary>
+        /// The jetty of a water intake: a walkway on posts out over the water it draws from, with the suction pipe
+        /// running along it down into the water.
+        /// </summary>
+        void Pier(GameObject building, int x, int y)
+        {
+            int toward = -1;
+            for (int d = 0; d < 4 && toward < 0; d++)
+            {
+                int nx = x + City.DX[d], ny = y + City.DY[d];
+                if (city.InBounds(nx, ny) && (city.Terrain[city.Index(nx, ny)] == Simulation.Terrain.Water || city.LakeOf[city.Index(nx, ny)] > 0)) toward = d;
+            }
+            if (toward < 0) return;
+            var b = new MeshBuilder(2);
+            var along = new Vector3(City.DX[toward], 0, City.DY[toward]);
+            var side = new Vector3(along.z, 0, -along.x);
+            var start = TileCentre(x, y) + along * 3.2f;
+            float bed = Ground(x + City.DX[toward], y + City.DY[toward]);
+            for (float s = 0; s <= 7.5f; s += 2.5f)
+            {
+                var p = start + along * s;
+                foreach (float o in new[] { -.8f, .8f })
+                    b.Box(1, p + side * o + Vector3.up * bed, new Vector3(.22f, .35f - bed, .22f));
+            }
+            var mid = start + along * 3.75f;
+            b.Box(0, mid + Vector3.up * .35f, Abs(along) * 7.8f + Abs(side) * 2f + Vector3.up * .14f);
+            // The pipe: along the walkway and down into the water at the end.
+            b.Box(1, mid + side * .55f + Vector3.up * .6f, Abs(along) * 7.6f + Abs(side) * .3f + Vector3.up * .3f);
+            b.Box(1, start + along * 7.4f + side * .55f + Vector3.up * (bed + .3f), new Vector3(.32f, .6f - bed, .32f));
+            var go = new GameObject("Muelle", typeof(MeshFilter), typeof(MeshRenderer));
+            go.transform.SetParent(building.transform, true);
+            go.transform.position = Vector3.zero;
+            go.transform.rotation = Quaternion.identity;
+            go.GetComponent<MeshFilter>().sharedMesh = b.ToMesh();
+            go.GetComponent<MeshRenderer>().sharedMaterials = Palette.Get("Trunk", "Metal");
+        }
+
+        // ---------------------------------------------------------------- lakes
+
+        readonly Dictionary<int, (MeshFilter filter, float drop, int wet)> lakeSurfaces = new Dictionary<int, (MeshFilter, float, int)>();
+        readonly MeshBuilder lakeMesh = new MeshBuilder(1);
+
+        /// <summary>Redraws the surface of a lake when its level has moved: lower, and only over the tiles still under water.</summary>
+        void UpdateLakes()
+        {
+            if (city == null) return;
+            foreach (var lake in city.Lakes)
+            {
+                int wet = 0;
+                foreach (int i in lake.Tiles) if (city.Terrain[i] == Simulation.Terrain.Water) wet++;
+                lakeSurfaces.TryGetValue(lake.Id, out var s);
+                if (s.filter != null && Mathf.Abs(s.drop - lake.Drop) < .02f && s.wet == wet) continue;
+                if (s.filter == null)
+                {
+                    var go = new GameObject($"Lago {lake.Id}", typeof(MeshFilter), typeof(MeshRenderer));
+                    go.transform.SetParent(transform, false);
+                    go.GetComponent<MeshRenderer>().sharedMaterial = Palette.Get("Water");
+                    s.filter = go.GetComponent<MeshFilter>();
+                    s.filter.sharedMesh = new Mesh { name = $"Lago {lake.Id}" };
+                }
+                lakeMesh.Clear();
+                float level = WaterLevel - lake.Drop * LakeScale;
+                foreach (int i in lake.Tiles)
+                {
+                    if (city.Terrain[i] != Simulation.Terrain.Water) continue;
+                    int x = i % city.Width, y = i / city.Width;
+                    lakeMesh.Flat(0, x * TileSize, y * TileSize, (x + 1) * TileSize, (y + 1) * TileSize, level);
+                }
+                s.filter.sharedMesh = lakeMesh.ToMesh(s.filter.sharedMesh);
+                lakeSurfaces[lake.Id] = (s.filter, lake.Drop, wet);
+            }
+        }
+
         void Update()
         {
+            UpdateLakes();
             if (layer != Layer.None && Time.unscaledTime >= layerRefreshAt) RefreshLayer();
             if (Time.unscaledTime >= warningsAt) RefreshWarnings();
             if (Time.unscaledTime >= dropsAt) BuildDrops();
@@ -1092,6 +1206,8 @@ namespace Horizonte.Presentation
                 case Layer.Sewage:
                 case Layer.Waste:
                     var s = LayerService(layer);
+                    // Intakes are where the water comes from; a dry one shows red.
+                    if (layer == Layer.Water && def.Intake > 0) return city.IntakeYield(a) > 0 ? Source : Lacks;
                     if (def.Service == s) return Source;
                     if (Catalog.Use(def, s, city.Occupants[a]) <= 0) return Neutral;
                     return city.Covered(a, s) ? Has : Lacks;

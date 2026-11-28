@@ -6,8 +6,8 @@ namespace Horizonte.Simulation
     [Serializable]
     public sealed class CitySave
     {
-        /// <summary>Version 4: the map with the tunnel entrance and closed forest (3 had the long highway; 2 had days; 1 zones).</summary>
-        public const int CurrentVersion = 4;
+        /// <summary>Version 5: lakes. 4: the map with the tunnel entrance and closed forest (still read, without lakes); 3 had the long highway; 2 had days; 1 zones.</summary>
+        public const int CurrentVersion = 5;
 
         public int version = CurrentVersion;
         public int width, height;
@@ -23,6 +23,9 @@ namespace Horizonte.Simulation
         /// <summary>Ticks left on buildings under construction (one byte per tile); missing in older saves.</summary>
         public string construction;
         public string[] models;
+        /// <summary>Lake of each tile and its depth in decimetres (one byte per tile), and the water in each lake.</summary>
+        public string lakes, lakeDepth;
+        public float[] lakeVolume;
         public long loanBalance;
         public int loanPayment;
 
@@ -73,12 +76,15 @@ namespace Horizonte.Simulation
                 models = table.ToArray(),
                 loanBalance = city.LoanBalance,
                 loanPayment = city.LoanPayment,
+                lakes = Convert.ToBase64String(city.LakeOf),
+                lakeDepth = Convert.ToBase64String(city.LakeDepth),
+                lakeVolume = city.Lakes.ConvertAll(l => l.Volume).ToArray(),
             };
         }
 
         public City ToCity()
         {
-            if (version != CurrentVersion) throw new InvalidOperationException($"Save version {version} is from an older game.");
+            if (version != CurrentVersion && version != 4) throw new InvalidOperationException($"Save version {version} is from an older game.");
             var city = new City(width, height, rng) { Money = money, Tick = tick, Wood = wood, MapSeed = mapSeed, GateX = gateX, TaxRate = taxRate, LoanBalance = loanBalance, LoanPayment = loanPayment };
             city.SetReserve(reserveX0, reserveY0, reserveX1, reserveY1);
             if (!string.IsNullOrEmpty(name)) city.Name = name;
@@ -99,6 +105,17 @@ namespace Horizonte.Simulation
                 city.Rotation[i] = r[i];
                 city.Occupants[i] = BitConverter.ToInt32(o, i * 4);
                 city.Construction[i] = i < k2.Length ? k2[i] : (byte)0;
+            }
+            if (!string.IsNullOrEmpty(lakes) && !string.IsNullOrEmpty(lakeDepth))
+            {
+                var lo = Convert.FromBase64String(lakes);
+                var ld = Convert.FromBase64String(lakeDepth);
+                if (lo.Length == n && ld.Length == n)
+                {
+                    lo.CopyTo(city.LakeOf, 0);
+                    ld.CopyTo(city.LakeDepth, 0);
+                    city.RebuildLakes(lakeVolume);
+                }
             }
             RebuildAnchors(city);
             city.Refresh();

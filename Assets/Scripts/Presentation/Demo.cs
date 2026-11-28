@@ -56,6 +56,13 @@ namespace Horizonte.Presentation
             for (int px = cx - 17; px <= cx - 1 && !parked; px++)
                 parked = city.Place(Catalog.Get("estacionamiento").Id, px, py) == PlaceResult.Ok;
 
+            // Water: a street down to the big lake and an intake on its shore.
+            int sx = cx - 18, sy = cy - 11;
+            while (sy > 2 && city.Terrain[city.Index(sx, sy - 1)] != Terrain.Water) Road(city, new[] { (sx, sy--) });
+            Road(city, new[] { (sx, sy) });
+            Try(city, "toma_agua", sx + 1, sy);
+            Try(city, "toma_agua", sx - 1, sy);
+
             // Wood: a logging camp by the grove across the highway from the first block.
             int gx = cx - 23, ry = cy - 1;
             Try(city, "puesto_tala", gx, ry);
