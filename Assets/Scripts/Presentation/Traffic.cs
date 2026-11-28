@@ -50,6 +50,9 @@ namespace Horizonte.Presentation
             /// <summary>The way a car parked at the kerb faces; for people, how far to the right of their path they walk.</summary>
             public int KerbDir;
             public float Offset;
+            /// <summary>For people: how far right of the path they are right now (more while overtaking), and whether they stand waiting.</summary>
+            public float Side;
+            public bool Waiting;
             /// <summary>Hour it leaves (parked) or clock time it leaves (stopped); seconds it has been held up.</summary>
             public float Until, Stuck;
             /// <summary>The person walking back to the car before it leaves.</summary>
@@ -316,7 +319,9 @@ namespace Horizonte.Presentation
             m.Leaving = -1;
             m.Phase = Next() % 100 / 15f;
             // Everyone keeps a little to the right, some more than others, so people meeting on the sidewalk pass each other.
-            m.Offset = .12f + Next() % 100 / 100f * .3f;
+            m.Offset = .26f + Next() % 100 / 100f * .2f;
+            m.Side = m.Offset;
+            m.Waiting = false;
             m.Stuck = 0;
             m.Go.transform.position = m.Points[0];
             m.Go.transform.localScale = Vector3.one;
@@ -773,7 +778,9 @@ namespace Horizonte.Presentation
             m.Age = 0;
             m.Leaving = -1;
             m.Phase = Next() % 100 / 15f;
-            m.Offset = .12f + Next() % 100 / 100f * .3f;
+            m.Offset = .26f + Next() % 100 / 100f * .2f;
+            m.Side = m.Offset;
+            m.Waiting = false;
             m.Stuck = 0;
             m.Go.transform.position = m.Points[0];
             m.Go.transform.localScale = Vector3.one;
@@ -966,7 +973,8 @@ namespace Horizonte.Presentation
             // Keep a distance from the car ahead.
             if (m.Car && Blocked(m, p, dt)) step = 0;
             // People do not walk through the one in front of them: they slow to its pace for a moment, then pass.
-            if (!m.Car && WalkBlocked(m, p, dt)) step *= .15f;
+            bool blocked = !m.Car && WalkBlocked(m, p, dt);
+            if (blocked) step = 0;
             bool waiting = false;
             while (step > 0 && m.Next < m.Points.Count)
             {
@@ -1003,6 +1011,8 @@ namespace Horizonte.Presentation
                     m.Next++;
                 }
             }
+            // Someone standing still, for whatever reason, is someone the others queue behind.
+            if (!m.Car) m.Waiting = waiting || blocked;
             t.position = p;
             // People go in through the door at the end of their walk; cars finish their trip.
             if (m.Next >= m.Points.Count) return false;
@@ -1015,7 +1025,7 @@ namespace Horizonte.Presentation
             {
                 // A light bob in step with walking.
                 m.Phase += dt * 9;
-                m.Body.localPosition = new Vector3(m.Offset, Mathf.Abs(Mathf.Sin(m.Phase)) * .06f, 0);
+                m.Body.localPosition = new Vector3(m.Side, Mathf.Abs(Mathf.Sin(m.Phase)) * .06f, 0);
             }
             return true;
         }
@@ -1103,32 +1113,43 @@ namespace Horizonte.Presentation
             return false;
         }
 
+        /// <summary>
+        /// Personal space. Nobody walks into someone standing still (waiting at a crossing they queue behind each other
+        /// along the sidewalk) and nobody walks through the one in front: they keep its pace for a moment, then overtake
+        /// a step further to the side. People coming the other way pass on their right.
+        /// </summary>
         bool WalkBlocked(Mover m, Vector3 p, float dt)
         {
-            if (m.Stuck > 2.5f)
-            {
-                // Overtakes after a while: a step further to the side than the one in front.
-                m.Stuck = m.Stuck > 4f ? 0 : m.Stuck + dt;
-                return false;
-            }
+            bool overtaking = m.Stuck < 0;
+            if (overtaking) m.Stuck = Mathf.Min(0, m.Stuck + dt);
+            m.Side = Mathf.MoveTowards(m.Side, m.Offset + (overtaking ? .55f : 0), dt * 1.2f);
             var ahead = m.Go.transform.forward;
             ahead.y = 0;
             ahead.Normalize();
             var right = new Vector3(ahead.z, 0, -ahead.x);
-            var me = p + right * m.Offset;
+            var me = p + right * m.Side;
             foreach (var other in walkers)
             {
                 if (other == m || other.Leaving >= 0 || !other.Go.activeSelf) continue;
                 var ot = other.Go.transform;
-                var v = ot.position + ot.right * other.Offset - me;
+                var v = ot.position + ot.right * other.Side - me;
                 v.y = 0;
-                float along = Vector3.Dot(v, ahead);
-                if (along < .15f || along > .85f || Mathf.Abs(Vector3.Dot(v, right)) > .4f) continue;
+                float along = Vector3.Dot(v, ahead), aside = Mathf.Abs(Vector3.Dot(v, right));
+                if (other.Waiting)
+                {
+                    // Someone standing: wait behind them, whichever way they face (a long wait lets one squeeze by).
+                    if (along < .1f || along > .75f || aside > .45f || m.Stuck > 25) continue;
+                    if (!overtaking) m.Stuck += dt;
+                    return true;
+                }
+                if (overtaking || along < .15f || along > .85f || aside > .4f) continue;
                 if (Vector3.Dot(ot.forward, ahead) < .3f) continue;
                 m.Stuck += dt;
+                // Stuck behind a slower walker for a while: overtake.
+                if (m.Stuck > 2.5f) m.Stuck = -3;
                 return true;
             }
-            m.Stuck = 0;
+            if (!overtaking) m.Stuck = 0;
             return false;
         }
 

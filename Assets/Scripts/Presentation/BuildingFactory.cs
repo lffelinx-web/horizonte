@@ -65,7 +65,11 @@ namespace Horizonte.Presentation
             int pick = (int)((seed / 7) % (uint)(facades.Length + 2));
             if (pick >= facades.Length) return;
             var renderer = go.GetComponent<MeshRenderer>();
-            if (renderer != null) renderer.sharedMaterial = facades[pick];
+            if (renderer == null) return;
+            // Only the walls' material changes; see-through glass, if any, stays.
+            var materials = renderer.sharedMaterials;
+            materials[0] = facades[pick];
+            renderer.sharedMaterials = materials;
         }
 
         static Material[] Materials(BuildingDef def)

@@ -382,6 +382,11 @@ namespace Horizonte.Presentation
                 yield return null;
                 yield return null;
 
+                // Health care up close by day, textures and see-through glass.
+                Hud.HideInfo();
+                foreach (var model in new[] { "consultorio", "clinica", "urgencias", "hospital_general", "laboratorio" })
+                    yield return CloseUp(folder, $"captura_{model}.png", i => City.DefAt(i)?.Model == model && City.Anchor[i] == i, model == "consultorio" ? 38 : 70);
+
                 // A building going up: the lot, the frame rising, and the finished building inside the scaffold.
                 City.IgnoreRequirements = true;
                 var tower = Catalog.Get("torre_corporativa");
@@ -412,8 +417,6 @@ namespace Horizonte.Presentation
                 // Close-ups to check that models face the street (rotation 0 faces south, toward a camera at yaw 0).
                 Hud.HideInfo();
                 yield return CloseUp(folder, "captura_casa.png", i => City.DefAt(i)?.Model == "casa_ampliada" && City.Rotation[i] == 0, 45);
-                foreach (var model in new[] { "consultorio", "clinica", "urgencias", "hospital_general", "laboratorio" })
-                    yield return CloseUp(folder, $"captura_{model}.png", i => City.DefAt(i)?.Model == model && City.Anchor[i] == i, 75);
                 yield return StreetLife(folder);
                 // A junction up close: rounded corners, zebra crossings, people crossing on them, cables to the houses.
                 SetHour(8);
